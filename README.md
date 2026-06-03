@@ -1,12 +1,17 @@
-# pi-autoresearch
+<div align="center">
 
-### Autonomous experiment loop for pi
+# 🔬 pi-autoresearch
 
-**[Install](#install)** · **[Usage](#usage)** · **[How it works](#how-it-works)**
+**Autonomous experiment loop for [pi](https://github.com/earendil-works/pi-coding-agent)**
+
+_Try an idea, measure it, keep what works, discard what doesn't, repeat forever._
+
+[![pi extension](https://img.shields.io/badge/pi-extension-blueviolet)](https://github.com/earendil-works/pi-coding-agent)
+[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 </div>
 
-_Try an idea, measure it, keep what works, discard what doesn't, repeat forever._
+---
 
 Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch) and forked from [davebcn87/pi-autoresearch](https://github.com/davebcn87/pi-autoresearch). Works for any optimization target: test speed, bundle size, LLM training, build times, Lighthouse scores.
 
