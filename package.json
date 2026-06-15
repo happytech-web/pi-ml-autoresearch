@@ -1,5 +1,5 @@
 {
-  "name": "pi-autoresearch",
+  "name": "pi-autoresearch-harness",
   "version": "1.0.0",
   "description": "Autonomous experiment loop for pi — run, measure, keep or discard. Inspired by karpathy/autoresearch.",
   "keywords": [

@@ -24,6 +24,12 @@ Inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch) an
 ## Quick start
 
 ```bash
+pi install npm:pi-autoresearch-harness
+```
+
+Or install from GitHub:
+
+```bash
 pi install https://github.com/monotykamary/pi-autoresearch
 ```
 
@@ -86,6 +92,12 @@ pi install https://github.com/monotykamary/pi-autoresearch
 ---
 
 ## Install
+
+```bash
+pi install npm:pi-autoresearch-harness
+```
+
+Or install from GitHub:
 
 ```bash
 pi install https://github.com/monotykamary/pi-autoresearch
