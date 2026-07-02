@@ -26,8 +26,8 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
   type SessionBeforeCompactEvent,
-} from '@mariozechner/pi-coding-agent';
-import { Text, truncateToWidth } from '@mariozechner/pi-tui';
+} from '@earendil-works/pi-coding-agent';
+import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import type {
   AutoresearchRuntime,
   ExperimentState,

@@ -334,7 +334,7 @@ function createSessionState(): SessionState {
 }
 
 // =============================================================================
-// Truncation (replaces @mariozechner/pi-coding-agent truncateTail)
+// Truncation (replaces @earendil-works/pi-coding-agent truncateTail)
 // =============================================================================
 
 interface TruncationResult {
