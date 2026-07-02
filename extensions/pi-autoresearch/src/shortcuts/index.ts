@@ -9,7 +9,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { KeyId } from '@mariozechner/pi-tui';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { getAgentDir } from '@mariozechner/pi-coding-agent';
 
 export const DEFAULT_TOGGLE_DASHBOARD_SHORTCUT: KeyId = 'ctrl+shift+a';
 export const DEFAULT_FULLSCREEN_DASHBOARD_SHORTCUT: KeyId = 'ctrl+shift+x';
@@ -28,10 +28,6 @@ interface AutoresearchShortcutConfig {
 
 export function autoresearchShortcutsConfigPath(agentDir: string = getAgentDir()): string {
   return join(agentDir, 'extensions', CONFIG_FILE_NAME);
-}
-
-function getAgentDir(): string {
-  return process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent');
 }
 
 export function resolveAutoresearchShortcuts(

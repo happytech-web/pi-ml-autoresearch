@@ -15,16 +15,17 @@
  *   - Writes session ID to disk for the harness server
  */
 
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn as spawnChild, type ChildProcess } from 'node:child_process';
 import { createServer, type Server, type ServerResponse } from 'node:http';
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  SessionBeforeCompactEvent,
+import {
+  getAgentDir,
+  type ExtensionAPI,
+  type ExtensionContext,
+  type SessionBeforeCompactEvent,
 } from '@mariozechner/pi-coding-agent';
 import { Text, truncateToWidth } from '@mariozechner/pi-tui';
 import type {
@@ -87,7 +88,7 @@ function getCliPath(): string {
 
 function installShellAlias(): void {
   try {
-    const agentBinDir = join(homedir(), '.pi', 'agent', 'bin');
+    const agentBinDir = join(getAgentDir(), 'bin');
     if (!fs.existsSync(agentBinDir)) {
       fs.mkdirSync(agentBinDir, { recursive: true });
     }
