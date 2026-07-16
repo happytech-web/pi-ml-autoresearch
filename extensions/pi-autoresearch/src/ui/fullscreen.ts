@@ -56,6 +56,11 @@ export function createFullscreenHandler(uiState: FullscreenState, ctx: Fullscree
     const runtime = getRuntime(extCtx);
     const state = runtime.state;
 
+    if (extCtx.mode !== 'tui') {
+      extCtx.ui.notify('Autoresearch fullscreen dashboard is available in TUI mode.', 'info');
+      return;
+    }
+
     if (state.results.length === 0) {
       extCtx.ui.notify('No experiments yet', 'info');
       return;
