@@ -63,7 +63,7 @@ export function renderDashboardLines(
       : '';
   lines.push(
     truncateToWidth(
-      `  ${th.fg('muted', 'Runs:')} ${th.fg('text', String(st.results.length))}` +
+      `  ${th.fg('muted', 'Runs:')} ${th.fg('muted', String(st.results.length))}` +
         `  ${th.fg('success', `${kept} kept`)}` +
         confSuffix +
         (discarded > 0 ? `  ${th.fg('warning', `${discarded} discarded`)}` : '') +

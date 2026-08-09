@@ -327,7 +327,7 @@ function createHarnessWidgetUpdater(
       extCtx.ui.setWidget('autoresearch', (_tui, theme) => {
         const parts = [
           theme.fg('accent', '🔬'),
-          theme.fg('text', ` ${state.name}`),
+          theme.fg('muted', ` ${state.name}`),
           theme.fg('dim', ' — ready'),
         ];
         return new Text(truncateToWidth(parts.join(''), width), 0, 0);

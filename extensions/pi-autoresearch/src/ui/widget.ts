@@ -220,7 +220,7 @@ export function createWidgetUpdater(ctx: WidgetContext) {
       extCtx.ui.setWidget('autoresearch', (_tui, theme) => {
         const parts = [
           theme.fg('accent', '🔬'),
-          succeeded ? theme.fg('text', ' done') : theme.fg('error', ' failed'),
+          succeeded ? theme.fg('muted', ' done') : theme.fg('error', ' failed'),
           theme.fg('dim', succeeded ? ' — call log_experiment' : ' — rerunning experiment'),
         ];
 
@@ -238,7 +238,7 @@ export function createWidgetUpdater(ctx: WidgetContext) {
       extCtx.ui.setWidget('autoresearch', (_tui, theme) => {
         const parts = [
           theme.fg('accent', '🔬'),
-          theme.fg('text', ` ${state.name}`),
+          theme.fg('muted', ` ${state.name}`),
           theme.fg('dim', ' — ready'),
         ];
 
