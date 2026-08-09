@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - 2026-04-28
+## [1.0.5] - 2026-08-09
 
 ### Added
 
@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Manual `/compact` mid-iteration no longer leaves the loop stuck — `session_compact` schedules a fresh resume.
 - Compaction during agent setup (before the first `log_experiment`) now resumes — the post-compaction gate is permissive.
 - Rapid back-to-back compactions all resume — no cooldown gate.
+- Widget/status surfaces: session name in widget one-liners, transient "done" state, and the dashboard "Runs:" count now render muted grey instead of white, matching pi core status-line styling.
 
 ### Removed
 
