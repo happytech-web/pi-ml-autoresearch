@@ -40,6 +40,35 @@ pi install https://github.com/monotykamary/pi-autoresearch
 | **Extension** | Tools + live widget + `/autoresearch` dashboard                 |
 | **Skill**     | Gathers what to optimize, writes session files, starts the loop |
 
+### Bounded ML trial mode (fork addition)
+
+This fork also ships `pi-ml-autoresearch`, a separate configuration-only execution path for
+approved ML searches. It does not use the generic edit/commit/revert loop.
+
+```text
+approved search revision
+  -> exact approved pilot contract hash
+  -> reconciled, single-writer preflight and budget reservation
+  -> asynchronous local trial
+  -> strict JSON primary metric
+  -> append-only events + TRIALS.md evidence
+  -> stop at promotion/contract/budget checkpoint
+```
+
+Key differences from generic autoresearch:
+
+- exact command/config/commit/data/seed/budget contracts for approved pilot trials;
+- bounded trial/GPU/time/failure/retry ceilings instead of `repeat forever`;
+- `planned/preflight/running/pilot-complete/failed/invalid/abandoned` trial states;
+- configuration-only execution with no automatic Git commit/revert;
+- strict `metricFile` JSON instead of parsing arbitrary stdout;
+- content-and-order reconciliation between operational JSONL events and project `TRIALS.md`;
+- optional `@narumitw/pi-goal` bridge via `/ml-search-goal <campaign-dir>`;
+- local runner first; SSH/tmux and scheduler adapters are not implemented yet.
+
+See [docs/ml-trial-mode.md](docs/ml-trial-mode.md). Generic `/autoresearch` behavior remains
+unchanged.
+
 ### Extension tools
 
 | Tool              | Description                                                           |

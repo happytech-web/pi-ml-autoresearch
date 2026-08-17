@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- Bounded `pi-ml-autoresearch` campaign CLI with approved search revisions, budget guards, explicit
+  ML trial states, detached local execution, strict JSON metrics, and fail-closed ledger
+  reconciliation.
+- Optional `/ml-search-goal` bridge for `@narumitw/pi-goal` managed-run RPC with graceful fallback.
+- ML campaign, runner, evidence, and goal-bridge tests.
+
 ## [1.0.5] - 2026-08-09
 
 ### Added

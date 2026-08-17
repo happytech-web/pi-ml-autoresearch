@@ -6,7 +6,8 @@
     "pi-package"
   ],
   "bin": {
-    "pi-autoresearch": "harness/pi-autoresearch.mjs"
+    "pi-autoresearch": "harness/pi-autoresearch.mjs",
+    "pi-ml-autoresearch": "harness/pi-ml-autoresearch.mjs"
   },
   "files": [
     "extensions",
