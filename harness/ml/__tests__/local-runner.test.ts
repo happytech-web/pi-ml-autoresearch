@@ -93,7 +93,16 @@ async function waitForTerminal(campaignDir: string): Promise<MlEvent> {
   throw new Error('Local runner did not finish');
 }
 
-describe('local ML runner', () => {
+const describeLocal = process.platform === 'win32' ? describe.skip : describe;
+const itOnWindows = process.platform === 'win32' ? it : it.skip;
+
+itOnWindows('rejects local ML trials without POSIX process-group semantics', () => {
+  expect(() => submitLocalTrial('unused', {} as MlTrialSpec)).toThrow(
+    'requires POSIX process-group semantics'
+  );
+});
+
+describeLocal('local ML runner', () => {
   it('runs out of process and accepts a strict finite primary metric', async () => {
     const { campaignDir, config, trial } = fixture('{val_loss: 0.25}');
     initCampaign(campaignDir, config);

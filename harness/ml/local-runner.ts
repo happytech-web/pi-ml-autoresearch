@@ -76,6 +76,9 @@ function runGuard(trial: MlTrialSpec): void {
 }
 
 export function submitLocalTrial(campaignDir: string, trial: MlTrialSpec): MlEvent {
+  if (process.platform === 'win32') {
+    throw new Error('Local ML runner requires POSIX process-group semantics');
+  }
   validateTrialSpec(loadConfig(campaignDir), trial);
   preflightTrial(campaignDir, trial);
   try {
@@ -238,7 +241,7 @@ export function pollLocalTrial(
   const trial = latest.trial ?? [...state.events].reverse().find((event) => event.trial)?.trial;
   if (!trial || trial.trialId !== trialId) throw new Error(`Missing trial spec for ${trialId}`);
 
-  const status = readWorkerStatus(campaignDir, latest.runId);
+  let status = readWorkerStatus(campaignDir, latest.runId);
   if (!status) {
     const ageMs = Date.now() - Date.parse(latest.timestamp);
     if (Number.isFinite(ageMs) && ageMs > 30_000) {
@@ -251,24 +254,28 @@ export function pollLocalTrial(
   if (status.state !== 'finished') {
     const ageMs = Date.now() - Date.parse(status.startedAt);
     if (!processIdentityMatches(status.workerPid, 'ml-worker.mjs', status.workerToken)) {
-      if (status.state === 'starting' && !status.childPid) {
-        if (ageMs <= 30_000) return status;
-        throw new Error(
-          'Worker exited before persisting process-group identity; trial remains running until operator recovery'
-        );
+      status = readWorkerStatus(campaignDir, latest.runId) ?? status;
+      if (status.state !== 'finished') {
+        if (status.state === 'starting' && !status.childPid) {
+          if (ageMs <= 30_000) return status;
+          throw new Error(
+            'Worker exited before persisting process-group identity; trial remains running until operator recovery'
+          );
+        }
+        if (
+          status.childPid &&
+          !terminateProcessTree(status.childPid, status.childIdentity, status.childToken)
+        ) {
+          throw new Error('Worker exited and its orphaned process tree could not be terminated');
+        }
+        return finishTrial(campaignDir, trialId, latest.runId, 'failed', {
+          detail:
+            status.error ??
+            `Worker exited before recording terminal status: pid=${status.workerPid}`,
+        });
       }
-      if (
-        status.childPid &&
-        !terminateProcessTree(status.childPid, status.childIdentity, status.childToken)
-      ) {
-        throw new Error('Worker exited and its orphaned process tree could not be terminated');
-      }
-      return finishTrial(campaignDir, trialId, latest.runId, 'failed', {
-        detail:
-          status.error ?? `Worker exited before recording terminal status: pid=${status.workerPid}`,
-      });
     }
-    return status;
+    if (status.state !== 'finished') return status;
   }
   const gpuHours = elapsedGpuHours(status, trial);
 

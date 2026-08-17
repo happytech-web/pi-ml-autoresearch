@@ -118,9 +118,11 @@ pi-ml-autoresearch reconcile --campaign .ml-coding/exp-lr/.runner
 pi-ml-autoresearch cancel --campaign .ml-coding/exp-lr/.runner --trial-id lr-0001
 ```
 
-The worker is detached from the Pi process. Reopening Pi or starting a new session does not stop a
-local trial; the next `poll` reads its status file and records the terminal event. Campaign writes
-use a single-writer lock, and `preflight` reservations count against parallelism before launch.
+The local runner requires POSIX process-group semantics; Windows clients can still pack a remote
+Linux bundle but cannot submit a local ML trial. The worker is detached from the Pi process.
+Reopening Pi or starting a new session does not stop a local trial; the next `poll` reads its status
+file and records the terminal event. Campaign writes use a single-writer lock, and `preflight`
+reservations count against parallelism before launch.
 
 `gpuHours` is a conservative reservation charged at `trial-started`, not measured utilization. It
 must be at least `wallClockMinutes / 60 * gpuCount`; unused reservation is not reclaimed in this
