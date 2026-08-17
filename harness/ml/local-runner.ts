@@ -138,6 +138,22 @@ function elapsedGpuHours(status: WorkerStatus, trial: MlTrialSpec): number | und
 }
 
 function processTreeAlive(pid: number): boolean {
+  if (process.platform === 'linux') {
+    try {
+      for (const entry of fs.readdirSync('/proc')) {
+        if (!/^\d+$/.test(entry)) continue;
+        try {
+          const stat = fs.readFileSync(`/proc/${entry}/stat`, 'utf8');
+          const fields = stat
+            .slice(stat.lastIndexOf(')') + 2)
+            .trim()
+            .split(/\s+/);
+          if (Number(fields[2]) === pid && fields[0] !== 'Z') return true;
+        } catch {}
+      }
+      return false;
+    } catch {}
+  }
   try {
     process.kill(process.platform === 'win32' ? pid : -pid, 0);
     return true;
@@ -248,7 +264,8 @@ export function pollLocalTrial(
         throw new Error('Worker exited and its orphaned process tree could not be terminated');
       }
       return finishTrial(campaignDir, trialId, latest.runId, 'failed', {
-        detail: `Worker exited before recording terminal status: pid=${status.workerPid}`,
+        detail:
+          status.error ?? `Worker exited before recording terminal status: pid=${status.workerPid}`,
       });
     }
     return status;

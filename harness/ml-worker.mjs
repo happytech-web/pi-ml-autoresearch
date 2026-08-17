@@ -66,6 +66,22 @@ function signalChildTree(signal) {
 
 function childTreeAlive() {
   if (!child.pid) return false;
+  if (process.platform === 'linux') {
+    try {
+      for (const entry of fs.readdirSync('/proc')) {
+        if (!/^\d+$/.test(entry)) continue;
+        try {
+          const stat = fs.readFileSync(`/proc/${entry}/stat`, 'utf8');
+          const fields = stat
+            .slice(stat.lastIndexOf(')') + 2)
+            .trim()
+            .split(/\s+/);
+          if (Number(fields[2]) === child.pid && fields[0] !== 'Z') return true;
+        } catch {}
+      }
+      return false;
+    } catch {}
+  }
   try {
     if (process.platform === 'win32') process.kill(child.pid, 0);
     else process.kill(-child.pid, 0);
