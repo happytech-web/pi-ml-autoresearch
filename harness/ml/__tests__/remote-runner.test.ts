@@ -132,7 +132,10 @@ function packViaCli(configFile: string, trialFiles: string[], bundle: string) {
   );
 }
 
-describe('remote fixed-queue executor', () => {
+const describeRemote = process.platform === 'win32' ? describe.skip : describe;
+const itOnLinux = process.platform === 'linux' ? it : it.skip;
+
+describeRemote('remote fixed-queue executor', () => {
   it('packs and executes an approved queue without Node on the remote side', () => {
     const { bundle, trial, configFile, trialFile } = fixture(0.25);
     const packed = packViaCli(configFile, [trialFile], bundle);
@@ -404,4 +407,66 @@ describe('remote fixed-queue executor', () => {
       if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
     }
   });
+
+  itOnLinux(
+    'cancels a live SIGTERM-resistant process group and rejects a false identity',
+    async () => {
+      const { bundle, config, trial, configFile, trialFile } = fixture(0.25);
+      const child =
+        'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)';
+      trial.command = {
+        executable: 'python3',
+        args: [
+          '-c',
+          `import signal,subprocess,sys,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); subprocess.Popen([sys.executable,'-c',${JSON.stringify(child)}]); time.sleep(30)`,
+        ],
+      };
+      config.approvedTrials[0]!.contractHash = trialContractHash(trial);
+      writeJson(configFile, config);
+      writeJson(trialFile, trial);
+      packRemoteBundle(configFile, [trialFile], bundle);
+
+      const executor = spawn(
+        'python3',
+        [path.join(bundle, 'remote-executor.py'), 'run', '--campaign', bundle],
+        { stdio: 'ignore' }
+      );
+      const runStatusFile = path.join(bundle, 'remote-runs', trial.runId, 'status.json');
+      await waitFor(() => fs.existsSync(runStatusFile));
+
+      const running = runExecutor(bundle, 'status');
+      expect(running.status, running.stderr).toBe(0);
+      expect(JSON.parse(running.stdout).state.status).toBe('running');
+      const reconciled = runExecutor(bundle, 'reconcile');
+      expect(reconciled.status, reconciled.stderr).toBe(0);
+
+      const cancelled = runExecutor(bundle, 'cancel');
+      expect(cancelled.status, cancelled.stderr).toBe(0);
+      expect(JSON.parse(cancelled.stdout).status).toBe('cancelled');
+      await new Promise((resolve) => executor.once('exit', resolve));
+      const events = fs
+        .readFileSync(path.join(bundle, 'remote-events.jsonl'), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(
+        events.find((event) => event.runId === trial.runId && event.type === 'trial-cancelled')
+          ?.status
+      ).toBe('abandoned');
+
+      const stateFile = path.join(bundle, 'remote-state.json');
+      const falseState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      const stat = fs.readFileSync(`/proc/${process.pid}/stat`, 'utf8');
+      falseState.status = 'running';
+      falseState.executorPid = process.pid;
+      falseState.executorStartTicks = Number(
+        stat.slice(stat.lastIndexOf(')') + 2).split(/\s+/)[19]
+      );
+      writeJson(stateFile, falseState);
+      const refused = runExecutor(bundle, 'cancel');
+      expect(refused.status).toBe(1);
+      expect(refused.stderr).toContain('identity cannot be verified');
+    },
+    20_000
+  );
 });
