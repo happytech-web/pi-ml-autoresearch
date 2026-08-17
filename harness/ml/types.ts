@@ -75,6 +75,12 @@ export interface MlTrialSpec {
   };
 }
 
+export interface MlRemoteQueue {
+  schemaVersion: 1;
+  searchRevision: string;
+  trials: MlTrialSpec[];
+}
+
 export type MlEventType =
   | 'campaign-initialized'
   | 'trial-preflight'

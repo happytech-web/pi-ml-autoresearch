@@ -141,7 +141,72 @@ The supervisor persists a per-run UUID identity before the training command star
 worker dies before that process-group identity becomes visible, the harness keeps the ledger
 `running` and requires operator recovery; it does not guess that the GPU process is gone.
 
-## Optional pi-goal bridge
+## Remote fixed queue
+
+Use this path when Pi runs on a workstation but training runs behind an interactive login or
+multiple jump hosts. The access path remains project-specific. The bundle executor starts only
+after the agent reaches the final Linux training host; it does not implement SSH, `blogin.py`,
+credential renewal, file transfer, or scheduler submission.
+
+The user-facing workflow stays conversational:
+
+1. The agent grills and locks the complete pilot queue, including any allowed retry run specs.
+2. The user approves that revision and performs any required one-time authentication.
+3. The agent packs and transfers the bundle through the declared server access path.
+4. The agent starts the executor as the foreground command of remote tmux/Slurm and may disconnect.
+5. A later agent reconnects, runs remote `status` and `reconcile`, verifies actual artifacts, then
+   records evidence and decisions in the local experiment documents.
+
+The agent-facing pack command accepts repeated `--trial` flags in execution order:
+
+```bash
+pi-ml-autoresearch pack-remote \
+  --config search.json \
+  --trial trial-lr-0001.json \
+  --trial trial-lr-0002.json \
+  --output remote-bundle
+```
+
+`search.json` and every trial must already contain absolute paths valid on the final host. Copy the
+generated directory to that host without editing `search.json` or `queue.json`, then start it under
+a durable remote supervisor. For tmux, keep the Python executor in the foreground of its session:
+
+```bash
+campaign=/absolute/remote/remote-bundle
+tmux new-session -d -s ml-exp-lr \
+  "cd '$campaign' && exec python3 remote-executor.py run --campaign '$campaign' > executor.log 2>&1"
+```
+
+The final host needs Linux, Git, Python 3.9+, the approved training environment, and no Node/Pi
+installation. The executor is sequential even when the approved parallel ceiling is larger. It:
+
+- validates the approved search revision and exact contract hashes before mutation;
+- pins search/queue digests on first run and rejects later edits;
+- holds a Linux `flock` for the full campaign executor lifetime;
+- verifies remote Git HEAD, tracked-clean status, guard command, real-path output containment, and
+  metric contract;
+- enforces trial, retry, reserved GPU-hour, per-run wall-clock, failure, and metric-target stops;
+- terminates the whole trial process group on timeout, cancellation, or a foreground leader that
+  exits while descendants remain;
+- writes `.remote-executor.lock`, `remote-state.json`, `remote-events.jsonl`,
+  `remote-runs/*/status.json`, and trial outputs on the final host.
+
+Inspect or reconcile after reconnecting:
+
+```bash
+python3 remote-executor.py status --campaign "$campaign"
+python3 remote-executor.py reconcile --campaign "$campaign"
+python3 remote-executor.py cancel --campaign "$campaign"
+```
+
+`cancel` verifies Linux PID start time, executor command, and campaign path before signaling.
+`status` and `reconcile` also verify that identity; if the executor disappeared during an active
+trial they monotonically update state to `recovery-required`. The harness never assumes the GPU
+process stopped or starts a duplicate. Remote operational events are not project evidence and do not
+edit local `TRIALS.md`; the reconnecting agent must verify the final host and then update the local
+experiment ledger.
+
+## Optional pi-goal bridge for local campaigns
 
 Install `@narumitw/pi-goal`, enable its managed-run RPC in `/goal settings`, then run:
 
@@ -152,8 +217,9 @@ Install `@narumitw/pi-goal`, enable its managed-run RPC in `/goal settings`, the
 The bridge starts at most one active/requested bounded goal for the approved revision and reports managed-run state. If the
 extension is absent or RPC is disabled, the campaign remains usable and the command reports a
 warning. `goal-run.json` is a session bridge cache, not trial evidence. Cancelling the goal does not
-cancel an active training process; run `pi-ml-autoresearch cancel` separately and verify its terminal
-status.
+cancel an active local training process; run `pi-ml-autoresearch cancel` separately and verify its
+terminal status. This bridge does not manage a remote fixed queue; reconnect to the final host and
+use `python3 remote-executor.py cancel --campaign <bundle>` there.
 
 ## Deliberate omissions
 
@@ -161,8 +227,6 @@ status.
 - no automatic promotion or fallback winner;
 - no production-code mutation;
 - no automatic ledger repair;
-- no SSH/tmux, scheduler, Kubernetes, or Hugging Face runner yet;
+- no generic SSH/jump-host, scheduler, Kubernetes, or Hugging Face adapter;
+- no dynamic candidate generation on the remote host;
 - no dashboard projection for ML trial states yet.
-
-The next adapter should implement the same submit/poll/cancel/collect contract for SSH/tmux without
-changing campaign state or evidence semantics.

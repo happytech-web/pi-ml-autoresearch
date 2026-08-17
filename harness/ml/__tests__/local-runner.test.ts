@@ -179,7 +179,7 @@ describe('local ML runner', () => {
       executable: process.execPath,
       args: [
         '-e',
-        `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`setTimeout(() => require('fs').writeFileSync(${JSON.stringify(marker)}, 'bad'), 500)`)}], {stdio:'ignore'})`,
+        `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`setTimeout(() => require('fs').writeFileSync(${JSON.stringify(marker)}, 'bad'), 500)`)}], {stdio:'ignore'}).unref()`,
       ],
     };
     config.approvedTrials[0]!.contractHash = trialContractHash(trial);

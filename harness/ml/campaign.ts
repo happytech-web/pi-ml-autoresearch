@@ -21,7 +21,7 @@ function canonicalJson(value: unknown): string {
   if (value && typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, item]) => item !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right));
+      .sort(([left], [right]) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
     return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(',')}}`;
   }
   return JSON.stringify(value);

@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { initCampaign, reconcileCampaign, snapshot, trialContractHash } from './ml/campaign.js';
 import { cancelLocalTrial, pollLocalTrial, submitLocalTrial } from './ml/local-runner.js';
+import { packRemoteBundle } from './ml/remote-bundle.js';
 import { readJson } from './ml/io.js';
 import type { MlSearchConfig, MlTrialSpec } from './ml/types.js';
 
@@ -14,12 +15,21 @@ function flag(args: string[], name: string): string {
   return value;
 }
 
+function flags(args: string[], name: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === `--${name}` && args[index + 1]) values.push(args[index + 1]!);
+  }
+  return values;
+}
+
 function usage(): string {
   return `pi-ml-autoresearch — bounded ML trial harness
 
 Usage:
   pi-ml-autoresearch init --campaign <dir> --config <search.json>
   pi-ml-autoresearch hash-trial --trial <trial.json>
+  pi-ml-autoresearch pack-remote --config <search.json> --trial <trial.json>... --output <dir>
   pi-ml-autoresearch submit --campaign <dir> --trial <trial.json>
   pi-ml-autoresearch poll --campaign <dir> --trial-id <id>
   pi-ml-autoresearch cancel --campaign <dir> --trial-id <id>
@@ -44,6 +54,14 @@ async function main(): Promise<void> {
   if (action === 'hash-trial') {
     const trial = readJson<MlTrialSpec>(path.resolve(flag(args, 'trial')));
     output({ trialId: trial.trialId, contractHash: trialContractHash(trial) });
+    return;
+  }
+  if (action === 'pack-remote') {
+    const trialFiles = flags(args, 'trial').map((file) => path.resolve(file));
+    if (trialFiles.length === 0) throw new Error('Missing --trial');
+    const outputDir = path.resolve(flag(args, 'output'));
+    const queue = packRemoteBundle(path.resolve(flag(args, 'config')), trialFiles, outputDir);
+    output({ outputDir, queue });
     return;
   }
   const campaignDir = path.resolve(flag(args, 'campaign'));

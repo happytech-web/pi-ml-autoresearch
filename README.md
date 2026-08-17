@@ -49,9 +49,9 @@ approved ML searches. It does not use the generic edit/commit/revert loop.
 approved search revision
   -> exact approved pilot contract hash
   -> reconciled, single-writer preflight and budget reservation
-  -> asynchronous local trial
+  -> asynchronous local trial OR fixed queue on the final training host
   -> strict JSON primary metric
-  -> append-only events + TRIALS.md evidence
+  -> append-only operational events, then verified project evidence
   -> stop at promotion/contract/budget checkpoint
 ```
 
@@ -64,7 +64,10 @@ Key differences from generic autoresearch:
 - strict `metricFile` JSON instead of parsing arbitrary stdout;
 - content-and-order reconciliation between operational JSONL events and project `TRIALS.md`;
 - optional `@narumitw/pi-goal` bridge via `/ml-search-goal <campaign-dir>`;
-- local runner first; SSH/tmux and scheduler adapters are not implemented yet.
+- standard-library Python remote executor for a pre-approved fixed queue;
+- full-lifetime single-writer lock and confirmed process-group cleanup on the final host;
+- no generic SSH, jump-host, or scheduler adapter: the agent bootstraps the bundle through the
+  project's existing access path and starts it in remote tmux/Slurm.
 
 See [docs/ml-trial-mode.md](docs/ml-trial-mode.md). Generic `/autoresearch` behavior remains
 unchanged.
