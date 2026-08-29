@@ -165,6 +165,17 @@ This is a transport lease, not training state. The remote executor and health se
 source of operational evidence; an unavailable lease means the local monitor is `unknown` and must
 reconcile after re-authentication.
 
+### Health input adapter
+
+`harness/ml-health-adapter.py` is an optional standard-library adapter for projects that can expose
+structured files on the final host. Its config declares `campaignId`, `runId`, `attemptId`, and any of
+`executorFile`, `progressFile`, `terminalFile`, `diskPath`, and bounded `logFiles` regex patterns. It
+writes a `0600` input JSON atomically; malformed or missing observations remain unavailable rather
+than being inferred healthy. A sentinel can invoke it before every probe with `--adapter` and
+`--adapter-config`. The adapter does not run training, execute arbitrary shell, alter queue/config,
+or interpret metric quality. Projects using Slurm, tmux, multi-rank launchers, GPU/NVML, or custom
+checkpoint contracts must provide and test a project-specific adapter on top of this schema.
+
 ### Scheduler bridge
 
 `harness/ml-monitor-tick.mjs` is the external-launcher boundary for periodic monitoring. A launchd

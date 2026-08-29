@@ -18,6 +18,8 @@ import math
 import os
 from pathlib import Path
 import signal
+import subprocess
+import sys
 import time
 from typing import Any
 
@@ -242,7 +244,37 @@ def probe(args: argparse.Namespace) -> dict[str, Any]:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
         previous = read_json(output) if output.exists() else None
         previous_state = previous.get("state") if previous else None
-        observation = observe_health(read_json(args.policy), read_json(args.input), previous_state)
+        payload = read_json(args.input)
+        if args.adapter:
+            adapter_command = [
+                sys.executable,
+                str(args.adapter),
+                "--config",
+                str(args.adapter_config),
+                "--output",
+                str(args.input),
+            ]
+            try:
+                adapter_result = subprocess.run(
+                    adapter_command,
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=30,
+                    text=True,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                adapter_result = None
+            if adapter_result is None or adapter_result.returncode != 0:
+                # Preserve run identity but invalidate all signals when the adapter cannot refresh.
+                payload["nowMs"] = now_ms()
+                payload["sentinelHeartbeatAtMs"] = None
+                payload["executor"] = {}
+                payload.pop("progress", None)
+                payload.pop("disk", None)
+            else:
+                payload = read_json(args.input)
+        observation = observe_health(read_json(args.policy), payload, previous_state)
         write_json_atomic(output, observation)
         previous_fingerprint = previous.get("fingerprint") if previous else None
         if previous_fingerprint != observation["fingerprint"] or previous_state != observation["state"]:
@@ -266,8 +298,12 @@ def main() -> int:
     parser.add_argument("--policy", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--events", required=True, type=Path)
+    parser.add_argument("--adapter", type=Path, help="optional project adapter script")
+    parser.add_argument("--adapter-config", type=Path, help="config passed to --adapter")
     parser.add_argument("--interval-seconds", type=float, default=0)
     args = parser.parse_args()
+    if bool(args.adapter) != bool(args.adapter_config):
+        raise ValueError("--adapter and --adapter-config must be supplied together")
     if args.interval_seconds < 0:
         raise ValueError("--interval-seconds must be non-negative")
     signal.signal(signal.SIGTERM, stop)

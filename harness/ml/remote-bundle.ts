@@ -103,5 +103,9 @@ export function packRemoteBundle(
   const bundledSentinel = path.join(outputDir, 'ml-health-sentinel.py');
   fs.copyFileSync(sentinel, bundledSentinel);
   fs.chmodSync(bundledSentinel, 0o755);
+  const adapter = fileURLToPath(new URL('../ml-health-adapter.py', import.meta.url));
+  const bundledAdapter = path.join(outputDir, 'ml-health-adapter.py');
+  fs.copyFileSync(adapter, bundledAdapter);
+  fs.chmodSync(bundledAdapter, 0o755);
   return queue;
 }
