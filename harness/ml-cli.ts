@@ -5,6 +5,12 @@ import * as path from 'node:path';
 import { initCampaign, reconcileCampaign, snapshot, trialContractHash } from './ml/campaign.js';
 import { cancelLocalTrial, pollLocalTrial, submitLocalTrial } from './ml/local-runner.js';
 import { packRemoteBundle } from './ml/remote-bundle.js';
+import {
+  observeHealth,
+  type HealthInput,
+  type HealthPolicy,
+  type HealthState,
+} from './ml/health.js';
 import { readJson } from './ml/io.js';
 import type { MlSearchConfig, MlTrialSpec } from './ml/types.js';
 
@@ -35,6 +41,7 @@ Usage:
   pi-ml-autoresearch cancel --campaign <dir> --trial-id <id>
   pi-ml-autoresearch status --campaign <dir>
   pi-ml-autoresearch reconcile --campaign <dir>
+  pi-ml-autoresearch health --input <health-input.json> --policy <health-policy.json> [--previous-state <state>]
 `;
 }
 
@@ -62,6 +69,15 @@ async function main(): Promise<void> {
     const outputDir = path.resolve(flag(args, 'output'));
     const queue = packRemoteBundle(path.resolve(flag(args, 'config')), trialFiles, outputDir);
     output({ outputDir, queue });
+    return;
+  }
+  if (action === 'health') {
+    const input = readJson<HealthInput>(path.resolve(flag(args, 'input')));
+    const policy = readJson<HealthPolicy>(path.resolve(flag(args, 'policy')));
+    const previous = args.includes('--previous-state')
+      ? (flag(args, 'previous-state') as HealthState)
+      : undefined;
+    output(observeHealth(policy, input, previous));
     return;
   }
   const campaignDir = path.resolve(flag(args, 'campaign'));
