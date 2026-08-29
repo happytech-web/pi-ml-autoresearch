@@ -3,10 +3,15 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createMonitorSchedule, readMonitorSchedule } from '../schedule-store.js';
+import {
+  createMonitorSchedule,
+  readMonitorSchedule,
+  updateMonitorSchedule,
+} from '../schedule-store.js';
 
 const dirs: string[] = [];
 const tick = path.resolve('harness/ml-monitor-tick.mjs');
+const itOnPosix = process.platform === 'win32' ? it.skip : it;
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
@@ -106,6 +111,64 @@ describe('launchd-compatible monitor tick entrypoint', () => {
     }
     expect(fs.existsSync(marker)).toBe(false);
   });
+
+  itOnPosix(
+    'waits for descendant cleanup before a later tick can run',
+    () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-monitor-tick-cleanup-'));
+      dirs.push(dir);
+      const scheduleFile = path.join(dir, 'schedule.json');
+      const pidFile = path.join(dir, 'descendant.pid');
+      const marker = path.join(dir, 'second-tick');
+      createMonitorSchedule(scheduleFile, {
+        campaignId: 'tick-campaign',
+        everyMs: 60_000,
+        nextDueAtMs: Date.now() - 1,
+      });
+      const descendant = `const fs=require('node:fs'); fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`;
+      const parent = `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], {stdio:'ignore'}); setTimeout(() => {}, 10000);`;
+      const first = spawnSync(
+        process.execPath,
+        [
+          tick,
+          '--schedule',
+          scheduleFile,
+          '--command-timeout-ms',
+          '50',
+          '--command',
+          process.execPath,
+          '-e',
+          parent,
+        ],
+        { encoding: 'utf8', timeout: 5_000 }
+      );
+      expect(first.status).toBe(2);
+      expect(fs.existsSync(pidFile)).toBe(true);
+
+      const persisted = readMonitorSchedule(scheduleFile);
+      expect(persisted).not.toBeNull();
+      updateMonitorSchedule(scheduleFile, persisted!.revision, (current) => ({
+        ...current,
+        schedule: { ...current.schedule, nextDueAtMs: Date.now() - 1 },
+      }));
+      const second = spawnSync(
+        process.execPath,
+        [
+          tick,
+          '--schedule',
+          scheduleFile,
+          '--command',
+          process.execPath,
+          '-e',
+          `const fs=require('node:fs'); const pid=Number(fs.readFileSync(${JSON.stringify(pidFile)}, 'utf8')); let alive=true; try { process.kill(pid, 0); } catch { alive=false; } fs.writeFileSync(${JSON.stringify(marker)}, alive ? 'overlap' : 'acquired');`,
+        ],
+        { encoding: 'utf8', timeout: 5_000 }
+      );
+      expect(second.status, second.stderr).toBe(0);
+      expect(fs.readFileSync(marker, 'utf8')).toBe('acquired');
+    },
+    10_000
+  );
 
   it('rejects a non-positive monitor command timeout', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-monitor-tick-'));

@@ -47,12 +47,17 @@ function runCommand(argv, timeoutMs) {
     let timedOut = false;
     let settled = false;
     let killTimer;
+    let cleanupTimer;
     const timer = setTimeout(() => {
       timedOut = true;
       signalProcessGroup(child, 'SIGTERM');
       killTimer = setTimeout(() => {
         killTimer = undefined;
         signalProcessGroup(child, 'SIGKILL');
+        cleanupTimer = setTimeout(
+          () => finish(new Error(`monitor runner timed out after ${timeoutMs}ms`)),
+          50
+        );
       }, 1_000);
     }, timeoutMs);
     const finish = (error) => {
@@ -61,13 +66,17 @@ function runCommand(argv, timeoutMs) {
       clearTimeout(timer);
       // Keep the forced group kill alive after a parent exits on SIGTERM.
       if (!timedOut && killTimer) clearTimeout(killTimer);
+      if (cleanupTimer) clearTimeout(cleanupTimer);
       if (error) reject(error);
       else resolve();
     };
-    child.once('error', (error) => finish(error));
+    child.once('error', (error) => {
+      if (!timedOut) finish(error);
+    });
     child.once('exit', (code, signal) => {
       if (timedOut) {
-        finish(new Error(`monitor runner timed out after ${timeoutMs}ms`));
+        // Defer the timeout result until the forced group kill has been sent.
+        return;
       } else if (code === 0) {
         finish();
       } else {

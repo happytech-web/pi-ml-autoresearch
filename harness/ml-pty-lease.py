@@ -224,6 +224,8 @@ class LeaseDaemon:
         command_text = command.strip()
         if any(token in command_text for token in (";", "|", "&", ">", "<", "`", "$", "(", ")")):
             raise PermissionError("probe command contains shell metacharacters")
+        if any(ord(character) < 0x20 or ord(character) == 0x7F for character in command_text):
+            raise PermissionError("probe command contains control characters")
         if not any(
             command_text == prefix or command_text.startswith(f"{prefix} ")
             for prefix in self.allowed_probe_prefixes
@@ -259,7 +261,15 @@ class LeaseDaemon:
             command = request.get("command")
             if not isinstance(command, str) or not command.strip():
                 raise ValueError("probe command is required")
-            result = self._send(command, int(request.get("timeoutMs", self.probe_timeout_ms)))
+            timeout_ms = request.get("timeoutMs", self.probe_timeout_ms)
+            if (
+                isinstance(timeout_ms, bool)
+                or not isinstance(timeout_ms, int)
+                or timeout_ms <= 0
+                or timeout_ms > self.probe_timeout_ms
+            ):
+                raise ValueError("probe timeout must be a positive integer within the daemon limit")
+            result = self._send(command, timeout_ms)
             return {"ok": True, "output": result, "state": self.state()}
         if action == "stop":
             self.stop()

@@ -257,6 +257,19 @@ describe('independent PTY connection lease daemon', () => {
     });
     expect(injected.ok).toBe(false);
     expect(injected.error).toContain('shell metacharacters');
+    const newlineInjected = await requestPtyLease(socket, {
+      action: 'probe',
+      command: 'printf SAFE\nrm -rf /',
+    });
+    expect(newlineInjected.ok).toBe(false);
+    expect(newlineInjected.error).toContain('control characters');
+    const oversizedTimeout = await requestPtyLease(socket, {
+      action: 'probe',
+      command: 'printf SAFE',
+      timeoutMs: 60_000,
+    });
+    expect(oversizedTimeout.ok).toBe(false);
+    expect(oversizedTimeout.error).toContain('within the daemon limit');
     const exited = new Promise<number | null>((resolve) => daemon.once('exit', resolve));
     expect((await requestPtyLease(socket, { action: 'stop' })).state.status).toBe('stopped');
     expect(await exited).toBe(0);
