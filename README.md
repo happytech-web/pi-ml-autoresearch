@@ -66,6 +66,7 @@ Key differences from generic autoresearch:
 - optional `@narumitw/pi-goal` bridge via `/ml-search-goal <campaign-dir>`;
 - standard-library Python remote executor for a pre-approved fixed queue;
 - full-lifetime single-writer lock and confirmed process-group cleanup on the final host;
+- deterministic health probe (`health` CLI) and durable alert-ledger primitives for local/mock validation;
 - no generic SSH, jump-host, or scheduler adapter: the agent bootstraps the bundle through the
   project's existing access path and starts it in remote tmux/Slurm.
 
