@@ -11,6 +11,87 @@ import {
 } from './alerts.js';
 import type { HealthObservation, HealthSeverity } from './health.js';
 
+export type MonitorLifecycleAction = 'continue' | 'cleanup';
+
+export interface MonitorLifecycleInput {
+  observation: HealthObservation;
+  reconcileVerified: boolean;
+  artifactsVerified: boolean;
+  recoveryRequired: boolean;
+}
+
+export type MonitorLifecycleDecision =
+  | { action: 'cleanup'; reason: 'completed-and-gates-verified' }
+  | {
+      action: 'continue';
+      reason:
+        | 'health-not-terminal'
+        | 'terminal-gate-incomplete'
+        | 'recovery-required'
+        | 'observation-unknown'
+        | 'failure-requires-review';
+    };
+
+export function decideMonitorLifecycle(input: MonitorLifecycleInput): MonitorLifecycleDecision {
+  if (input.recoveryRequired) return { action: 'continue', reason: 'recovery-required' };
+  if (input.observation.state === 'unknown') {
+    return { action: 'continue', reason: 'observation-unknown' };
+  }
+  if (input.observation.state === 'completed') {
+    if (input.reconcileVerified && input.artifactsVerified) {
+      return { action: 'cleanup', reason: 'completed-and-gates-verified' };
+    }
+    return { action: 'continue', reason: 'terminal-gate-incomplete' };
+  }
+  if (input.observation.state === 'failed') {
+    return { action: 'continue', reason: 'failure-requires-review' };
+  }
+  return { action: 'continue', reason: 'health-not-terminal' };
+}
+
+export type MonitorAuthorityAction =
+  | 'block-next-trial'
+  | 'cancel-active-trial'
+  | 'retry-trial'
+  | 'resume-trial'
+  | 'mutate-search';
+
+export interface MonitorAuthorityDecision {
+  allowed: boolean;
+  reason:
+    | 'safety-block'
+    | 'cancel-safety-invariant-required'
+    | 'cancel-requires-critical-failure'
+    | 'automatic-retry-forbidden'
+    | 'automatic-resume-forbidden'
+    | 'search-mutation-forbidden'
+    | 'not-needed';
+}
+
+export function authorizeMonitorAction(
+  action: MonitorAuthorityAction,
+  observation: HealthObservation,
+  safetyInvariantVerified = false
+): MonitorAuthorityDecision {
+  if (action === 'block-next-trial') {
+    return observation.state === 'healthy' || observation.state === 'completed'
+      ? { allowed: false, reason: 'not-needed' }
+      : { allowed: true, reason: 'safety-block' };
+  }
+  if (action === 'cancel-active-trial') {
+    const critical = observation.evidence.some((item) => item.severity === 'critical');
+    if (!safetyInvariantVerified) {
+      return { allowed: false, reason: 'cancel-safety-invariant-required' };
+    }
+    return observation.state === 'failed' && critical
+      ? { allowed: true, reason: 'safety-block' }
+      : { allowed: false, reason: 'cancel-requires-critical-failure' };
+  }
+  if (action === 'retry-trial') return { allowed: false, reason: 'automatic-retry-forbidden' };
+  if (action === 'resume-trial') return { allowed: false, reason: 'automatic-resume-forbidden' };
+  return { allowed: false, reason: 'search-mutation-forbidden' };
+}
+
 export type LeaseStatus = 'active' | 'reauth-required';
 
 export interface ConnectionLease {
@@ -60,7 +141,10 @@ export function readConnectionLease(file: string): ConnectionLease | null {
 
 export type LeaseReuseResult =
   | { usable: true; lease: ConnectionLease }
-  | { usable: false; reason: 'missing' | 'campaign-mismatch' | 'reauth-required' };
+  | {
+      usable: false;
+      reason: 'missing' | 'campaign-mismatch' | 'reauth-required' | 'transport-unavailable';
+    };
 
 export function reuseConnectionLease(
   file: string,
@@ -80,6 +164,31 @@ export function reuseConnectionLease(
   writeJsonAtomic(file, touched);
   fs.chmodSync(file, 0o600);
   return { usable: true, lease: touched };
+}
+
+export interface ConnectionTransportProbe {
+  isAlive(lease: ConnectionLease): Promise<boolean>;
+}
+
+export async function verifyConnectionLease(
+  file: string,
+  campaignId: string,
+  nowMs: number,
+  transport: ConnectionTransportProbe
+): Promise<LeaseReuseResult> {
+  const reused = reuseConnectionLease(file, campaignId, nowMs);
+  if (!reused.usable) return reused;
+  let alive = false;
+  try {
+    alive = await transport.isAlive(reused.lease);
+  } catch {
+    alive = false;
+  }
+  if (alive) return reused;
+  const expired = { ...reused.lease, status: 'reauth-required' as const };
+  writeJsonAtomic(file, expired);
+  fs.chmodSync(file, 0o600);
+  return { usable: false, reason: 'transport-unavailable' };
 }
 
 export interface MonitorSchedule {

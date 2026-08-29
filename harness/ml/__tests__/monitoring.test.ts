@@ -4,6 +4,8 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildMinimalNotification,
+  authorizeMonitorAction,
+  decideMonitorLifecycle,
   deliverNotification,
   dispatchNotification,
   establishConnectionLease,
@@ -11,6 +13,7 @@ import {
   decideScheduleTick,
   type MinimalNotification,
   type NotificationAdapter,
+  verifyConnectionLease,
 } from '../monitoring.js';
 import { observeHealth, type HealthInput, type HealthPolicy } from '../health.js';
 
@@ -71,6 +74,69 @@ describe('monitor control adapters', () => {
     expect(JSON.parse(fs.readFileSync(file, 'utf8')).status).toBe('reauth-required');
   });
 
+  it('keeps monitoring active until completed, artifact, and reconcile gates pass', () => {
+    const completed = observeHealth(healthPolicy, {
+      ...healthyInput(),
+      terminal: {
+        contractVerified: true,
+        artifactsVerified: true,
+        reconcileVerified: true,
+        allRanksExited: true,
+      },
+    });
+    expect(
+      decideMonitorLifecycle({
+        observation: completed,
+        reconcileVerified: false,
+        artifactsVerified: true,
+        recoveryRequired: false,
+      })
+    ).toEqual({ action: 'continue', reason: 'terminal-gate-incomplete' });
+    expect(
+      decideMonitorLifecycle({
+        observation: completed,
+        reconcileVerified: true,
+        artifactsVerified: true,
+        recoveryRequired: false,
+      })
+    ).toEqual({ action: 'cleanup', reason: 'completed-and-gates-verified' });
+    expect(
+      decideMonitorLifecycle({
+        observation: completed,
+        reconcileVerified: true,
+        artifactsVerified: true,
+        recoveryRequired: true,
+      })
+    ).toEqual({ action: 'continue', reason: 'recovery-required' });
+  });
+
+  it('blocks unsafe automatic actions and never cancels unknown observations', () => {
+    const failed = observeHealth(healthPolicy, {
+      ...healthyInput(),
+      executor: { processAlive: false, identityMatches: false },
+    });
+    const unknown = observeHealth(healthPolicy, {
+      ...healthyInput(),
+      sentinelHeartbeatAtMs: undefined,
+    });
+    expect(authorizeMonitorAction('block-next-trial', unknown).allowed).toBe(true);
+    expect(authorizeMonitorAction('cancel-active-trial', unknown, true)).toEqual({
+      allowed: false,
+      reason: 'cancel-requires-critical-failure',
+    });
+    expect(authorizeMonitorAction('cancel-active-trial', failed)).toEqual({
+      allowed: false,
+      reason: 'cancel-safety-invariant-required',
+    });
+    expect(authorizeMonitorAction('cancel-active-trial', failed, true)).toEqual({
+      allowed: true,
+      reason: 'safety-block',
+    });
+    expect(authorizeMonitorAction('retry-trial', failed).allowed).toBe(false);
+    expect(authorizeMonitorAction('resume-trial', failed).allowed).toBe(false);
+    expect(authorizeMonitorAction('mutate-search', failed).allowed).toBe(false);
+  });
+
   it('rejects a lease belonging to another campaign', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-lease-'));
     dirs.push(dir);
@@ -91,6 +157,24 @@ describe('monitor control adapters', () => {
     fs.writeFileSync(file, '{"schemaVersion":1,"campaignId":');
     expect(() => reuseConnectionLease(file, 'campaign-monitor', 110)).toThrow();
     expect(fs.readFileSync(file, 'utf8')).toBe('{"schemaVersion":1,"campaignId":');
+  });
+
+  it('requires the underlying PTY/SSH transport to be alive before reusing a lease', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-lease-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'lease.json');
+    const lease = establishConnectionLease(file, 'campaign-monitor', 100, 50);
+    expect(
+      await verifyConnectionLease(file, 'campaign-monitor', 120, {
+        isAlive: async (current) => current.leaseId === lease.leaseId,
+      })
+    ).toMatchObject({ usable: true });
+    expect(
+      await verifyConnectionLease(file, 'campaign-monitor', 125, {
+        isAlive: async () => false,
+      })
+    ).toEqual({ usable: false, reason: 'transport-unavailable' });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).status).toBe('reauth-required');
   });
 
   it('skips overlapping schedule ticks and reports due/catch-up ticks', () => {
