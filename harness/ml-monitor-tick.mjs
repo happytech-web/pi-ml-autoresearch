@@ -37,6 +37,28 @@ function signalProcessGroup(child, signal) {
   } catch {}
 }
 
+function processGroupExists(child) {
+  if (!child.pid || process.platform === 'win32') return false;
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== 'ESRCH';
+  }
+}
+
+function waitForProcessGroupCleanup(child, timeoutMs) {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    const poll = () => {
+      if (!processGroupExists(child)) return resolve(true);
+      if (Date.now() >= deadline) return resolve(false);
+      setTimeout(poll, 25);
+    };
+    poll();
+  });
+}
+
 function runCommand(argv, timeoutMs) {
   return new Promise((resolve, reject) => {
     const [executable, ...args] = argv;
@@ -47,16 +69,20 @@ function runCommand(argv, timeoutMs) {
     let timedOut = false;
     let settled = false;
     let killTimer;
-    let cleanupTimer;
     const timer = setTimeout(() => {
       timedOut = true;
       signalProcessGroup(child, 'SIGTERM');
       killTimer = setTimeout(() => {
         killTimer = undefined;
         signalProcessGroup(child, 'SIGKILL');
-        cleanupTimer = setTimeout(
-          () => finish(new Error(`monitor runner timed out after ${timeoutMs}ms`)),
-          50
+        waitForProcessGroupCleanup(child, 5_000).then((cleaned) =>
+          finish(
+            new Error(
+              cleaned
+                ? `monitor runner timed out after ${timeoutMs}ms`
+                : `monitor runner timed out after ${timeoutMs}ms; process-group cleanup was not confirmed`
+            )
+          )
         );
       }, 1_000);
     }, timeoutMs);
@@ -66,7 +92,6 @@ function runCommand(argv, timeoutMs) {
       clearTimeout(timer);
       // Keep the forced group kill alive after a parent exits on SIGTERM.
       if (!timedOut && killTimer) clearTimeout(killTimer);
-      if (cleanupTimer) clearTimeout(cleanupTimer);
       if (error) reject(error);
       else resolve();
     };
