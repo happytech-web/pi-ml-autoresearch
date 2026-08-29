@@ -157,6 +157,9 @@ describeRemote('remote fixed-queue executor', () => {
     expect(JSON.parse(fs.readFileSync(path.join(bundle, 'remote-state.json'), 'utf8')).status).toBe(
       'completed'
     );
+    expect(fs.statSync(path.join(bundle, 'remote-state.json')).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.join(bundle, 'remote-events.jsonl')).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.join(bundle, '.remote-executor.lock')).mode & 0o777).toBe(0o600);
     const events = fs
       .readFileSync(path.join(bundle, 'remote-events.jsonl'), 'utf8')
       .trim()

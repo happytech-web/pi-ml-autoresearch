@@ -74,6 +74,30 @@ describe('monitor control adapters', () => {
     expect(JSON.parse(fs.readFileSync(file, 'utf8')).status).toBe('reauth-required');
   });
 
+  it('keeps monitoring paused while an interactive reauthentication is starting', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-lease-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'lease.json');
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        schemaVersion: 1,
+        campaignId: 'campaign-monitor',
+        leaseId: 'lease-starting',
+        transport: 'background-pty',
+        createdAtMs: 100,
+        expiresAtMs: 10_000,
+        lastUsedAtMs: 100,
+        status: 'starting',
+      })
+    );
+    expect(reuseConnectionLease(file, 'campaign-monitor', 120)).toEqual({
+      usable: false,
+      reason: 'authentication-pending',
+    });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).status).toBe('starting');
+  });
+
   it('keeps monitoring active until completed, artifact, and reconcile gates pass', () => {
     const completed = observeHealth(healthPolicy, {
       ...healthyInput(),

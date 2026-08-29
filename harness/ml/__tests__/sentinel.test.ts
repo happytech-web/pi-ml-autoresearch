@@ -82,6 +82,8 @@ describe('remote health sentinel mock', () => {
     expect(
       fs.readFileSync(path.join(dir, 'health-events.jsonl'), 'utf8').trim().split('\n')
     ).toHaveLength(1);
+    expect(fs.statSync(path.join(dir, 'health.json')).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.join(dir, 'health-events.jsonl')).mode & 0o777).toBe(0o600);
   });
 
   it('records a new event for a fatal executor observation without touching other files', () => {

@@ -78,7 +78,7 @@ class LeaseDaemon:
     def persist(self) -> None:
         write_json_atomic(self.state_path, self.state())
 
-    def start(self) -> None:
+    def start(self, activate: bool = True) -> None:
         if not self.command:
             raise ValueError("bootstrap command is required")
         master, slave = pty.openpty()
@@ -95,7 +95,7 @@ class LeaseDaemon:
             os.close(slave)
         self.master_fd = master
         os.set_blocking(master, False)
-        self.status = "active"
+        self.status = "active" if activate else "starting"
         self.persist()
         self.generation += 1
         generation = self.generation
@@ -125,9 +125,12 @@ class LeaseDaemon:
         except OSError:
             pass
         with self.lock:
-            if self.master_fd == master_fd:
+            # A closed reader may race with reauthentication.  File descriptor
+            # numbers can be reused, so generation must match before clearing
+            # the currently active transport.
+            if generation == self.generation and self.master_fd == master_fd:
                 self.master_fd = None
-            if generation == self.generation and self.status == "active":
+            if generation == self.generation and self.status in {"active", "starting"}:
                 self.status = "reauth-required"
                 self.error = "bootstrap PTY exited or relay connection closed"
                 self.persist()
@@ -136,7 +139,7 @@ class LeaseDaemon:
 
     def check_expiry(self) -> None:
         with self.lock:
-            if self.status == "active" and now_ms() >= self.expires_at_ms:
+            if self.status in {"active", "starting"} and now_ms() >= self.expires_at_ms:
                 self.status = "reauth-required"
                 self.error = "connection lease expired; explicit reauthentication required"
                 self.persist()
@@ -201,7 +204,17 @@ class LeaseDaemon:
             self.expires_at_ms = now_ms() + self.ttl_ms
             self.status = "starting"
             self.error = None
-            self.start()
+            self.start(activate=False)
+
+    def mark_ready(self) -> None:
+        with self.lock:
+            if self.status != "starting":
+                raise RuntimeError("lease is not waiting for bootstrap readiness")
+            if self.child is None or self.child.poll() is not None or self.master_fd is None:
+                raise RuntimeError("bootstrap is no longer running; reauthentication required")
+            self.status = "active"
+            self.error = None
+            self.persist()
 
     def _send(self, command: str, timeout_ms: int) -> str:
         if len(command) > 16 * 1024:
@@ -253,6 +266,9 @@ class LeaseDaemon:
             return {"ok": True, "state": self.state()}
         if action == "reauth":
             self.reauthenticate()
+            return {"ok": True, "state": self.state()}
+        if action == "ready":
+            self.mark_ready()
             return {"ok": True, "state": self.state()}
         raise ValueError("unsupported lease action")
 

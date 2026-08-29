@@ -92,7 +92,7 @@ export function authorizeMonitorAction(
   return { allowed: false, reason: 'search-mutation-forbidden' };
 }
 
-export type LeaseStatus = 'active' | 'reauth-required';
+export type LeaseStatus = 'starting' | 'active' | 'reauth-required';
 
 export interface ConnectionLease {
   schemaVersion: 1;
@@ -133,7 +133,12 @@ export function establishConnectionLease(
 export function readConnectionLease(file: string): ConnectionLease | null {
   if (!fs.existsSync(file)) return null;
   const lease = readJson<ConnectionLease>(file);
-  if (lease.schemaVersion !== 1 || !lease.campaignId || !lease.leaseId) {
+  if (
+    lease.schemaVersion !== 1 ||
+    !lease.campaignId ||
+    !lease.leaseId ||
+    !['starting', 'active', 'reauth-required'].includes(lease.status)
+  ) {
     throw new Error('Invalid connection lease');
   }
   return lease;
@@ -143,7 +148,12 @@ export type LeaseReuseResult =
   | { usable: true; lease: ConnectionLease }
   | {
       usable: false;
-      reason: 'missing' | 'campaign-mismatch' | 'reauth-required' | 'transport-unavailable';
+      reason:
+        | 'missing'
+        | 'campaign-mismatch'
+        | 'authentication-pending'
+        | 'reauth-required'
+        | 'transport-unavailable';
     };
 
 export function reuseConnectionLease(
@@ -154,6 +164,9 @@ export function reuseConnectionLease(
   const lease = readConnectionLease(file);
   if (!lease) return { usable: false, reason: 'missing' };
   if (lease.campaignId !== campaignId) return { usable: false, reason: 'campaign-mismatch' };
+  if (lease.status === 'starting') {
+    return { usable: false, reason: 'authentication-pending' };
+  }
   if (lease.status !== 'active' || nowMs >= lease.expiresAtMs) {
     const expired = { ...lease, status: 'reauth-required' as const };
     writeJsonAtomic(file, expired);

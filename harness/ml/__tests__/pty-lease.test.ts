@@ -120,8 +120,10 @@ describe('independent PTY connection lease daemon', () => {
 
     const reauthed = await requestPtyLease(socket, { action: 'reauth' });
     expect(reauthed.ok).toBe(true);
-    expect(reauthed.state.status).toBe('active');
+    expect(reauthed.state.status).toBe('starting');
     expect(reauthed.state.leaseId).not.toBe(before.state.leaseId);
+    const ready = await requestPtyLease(socket, { action: 'ready' });
+    expect(ready.state.status).toBe('active');
     const probe = await requestPtyLease(socket, { action: 'probe', command: 'printf RECOVERED' });
     expect(probe.ok).toBe(true);
     expect(probe.output).toContain('RECOVERED');
@@ -148,6 +150,85 @@ describe('independent PTY connection lease daemon', () => {
     expect(refused.ok).toBe(false);
     expect(refused.error).toContain('only allowed');
     expect(refused.state.status).toBe('active');
+    const exited = new Promise<number | null>((resolve) => daemon.once('exit', resolve));
+    expect((await requestPtyLease(socket, { action: 'stop' })).state.status).toBe('stopped');
+    expect(await exited).toBe(0);
+  }, 10_000);
+
+  it('expires an unfinished reauth instead of leaving the lease stuck in starting', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-pty-lease-'));
+    dirs.push(dir);
+    const socket = path.join(dir, 'lease.sock');
+    const state = path.join(dir, 'lease.json');
+    const daemon = startPtyLeaseDaemon({
+      socket,
+      state,
+      command: ['bash', '--noprofile', '--norc', '-i'],
+      ttlSeconds: 0.15,
+      probeTimeoutSeconds: 1,
+      allowedProbePrefixes: ['printf'],
+    });
+    await waitFor(() => fs.existsSync(state));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect((await requestPtyLease(socket, { action: 'status' })).state.status).toBe(
+      'reauth-required'
+    );
+    const reauthed = await requestPtyLease(socket, { action: 'reauth' });
+    expect(reauthed.state.status).toBe('starting');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const expired = await requestPtyLease(socket, { action: 'status' });
+    expect(expired.state.status).toBe('reauth-required');
+    const ready = await requestPtyLease(socket, { action: 'ready' });
+    expect(ready.ok).toBe(false);
+    expect(ready.error).toContain('waiting for bootstrap readiness');
+    const exited = new Promise<number | null>((resolve) => daemon.once('exit', resolve));
+    expect((await requestPtyLease(socket, { action: 'stop' })).state.status).toBe('stopped');
+    expect(await exited).toBe(0);
+  }, 10_000);
+
+  it('keeps a multi-hop-style bootstrap alive until relay EOF and never auto-restarts it', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-pty-lease-'));
+    dirs.push(dir);
+    const socket = path.join(dir, 'lease.sock');
+    const state = path.join(dir, 'lease.json');
+    const count = path.join(dir, 'bootstrap-count');
+    const bootstrap = path.join(dir, 'bootstrap.py');
+    fs.writeFileSync(
+      bootstrap,
+      [
+        'import os, pathlib, sys',
+        'p = pathlib.Path(sys.argv[1])',
+        'p.write_text(str(int(p.read_text()) + 1) if p.exists() else "1")',
+        'os.execvp("bash", ["bash", "--noprofile", "--norc", "-i"])',
+        '',
+      ].join('\n')
+    );
+    const daemon = startPtyLeaseDaemon({
+      socket,
+      state,
+      command: ['python3', bootstrap, count],
+      ttlSeconds: 5,
+      probeTimeoutSeconds: 1,
+      allowedProbePrefixes: ['printf'],
+    });
+    await waitFor(() => fs.existsSync(state));
+    const initial = await requestPtyLease(socket, { action: 'status' });
+    await waitFor(() => fs.existsSync(count));
+    expect(fs.readFileSync(count, 'utf8')).toBe('1');
+    expect(
+      (await requestPtyLease(socket, { action: 'probe', command: 'printf HOP' })).output
+    ).toContain('HOP');
+    process.kill(initial.state.pid!, 'SIGKILL');
+    await waitFor(() => JSON.parse(fs.readFileSync(state, 'utf8')).status === 'reauth-required');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(fs.readFileSync(count, 'utf8')).toBe('1');
+    const reauthed = await requestPtyLease(socket, { action: 'reauth' });
+    await waitFor(() => fs.readFileSync(count, 'utf8') === '2');
+    expect(reauthed.state.status).toBe('starting');
+    expect((await requestPtyLease(socket, { action: 'ready' })).state.status).toBe('active');
+    expect(
+      (await requestPtyLease(socket, { action: 'probe', command: 'printf REAUTH-HOP' })).output
+    ).toContain('REAUTH-HOP');
     const exited = new Promise<number | null>((resolve) => daemon.once('exit', resolve));
     expect((await requestPtyLease(socket, { action: 'stop' })).state.status).toBe('stopped');
     expect(await exited).toBe(0);

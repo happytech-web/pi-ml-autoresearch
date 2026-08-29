@@ -62,6 +62,7 @@ def write_json_atomic(file: Path, value: Any) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, file)
+    os.chmod(file, 0o600)
 
 
 def js_number(value: float) -> str:
@@ -341,6 +342,7 @@ def append_event(campaign: Path, config: dict[str, Any], event_type: str, **valu
         **values,
     }
     with (campaign / EVENTS_FILE).open("a", encoding="utf-8") as handle:
+        os.chmod(campaign / EVENTS_FILE, 0o600)
         handle.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
@@ -679,6 +681,7 @@ def process_identity_matches(pid: int, start_ticks: int, campaign: Path) -> bool
 
 def acquire_run_lock(campaign: Path) -> TextIO:
     lock = (campaign / LOCK_FILE).open("a+", encoding="utf-8")
+    os.chmod(campaign / LOCK_FILE, 0o600)
     try:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as error:

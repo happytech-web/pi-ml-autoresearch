@@ -77,7 +77,8 @@ Key differences from generic autoresearch:
   bearer secret loading and endpoint/timeout validation;
 - explicit env-only ntfy and Gotify channel wrappers with service-specific payload and auth headers;
 - optional user-owned Python PTY lease daemon for reusing one interactive bootstrap (for example
-  `blogin.py`) across Pi sessions; relay EOF/TTL enters an explicit re-auth gate and never auto-retries;
+  `blogin.py`) across Pi sessions; relay EOF/TTL enters an explicit re-auth gate, uses a
+  `reauth`/`ready` handshake, and never auto-retries;
 - launchd-compatible `ml-monitor-tick.mjs` entrypoint that gates an external monitor argv bridge with
   durable due/overlap state; it does not pretend that `pi-subagents` is a shell CLI or start models on
   normal non-due ticks;

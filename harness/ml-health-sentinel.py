@@ -48,6 +48,7 @@ def write_json_atomic(file: Path, value: Any) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, file)
+    os.chmod(file, 0o600)
 
 
 def evidence(
@@ -244,6 +245,7 @@ def probe(args: argparse.Namespace) -> dict[str, Any]:
     lock_path = output.with_name(f".{output.name}.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("w", encoding="utf-8") as lock_handle:
+        os.chmod(lock_path, 0o600)
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
         previous = read_json(output) if output.exists() else None
         previous_state = previous.get("state") if previous else None
@@ -283,6 +285,7 @@ def probe(args: argparse.Namespace) -> dict[str, Any]:
         if previous_fingerprint != observation["fingerprint"] or previous_state != observation["state"]:
             events.parent.mkdir(parents=True, exist_ok=True)
             with events.open("a", encoding="utf-8") as handle:
+                os.chmod(events, 0o600)
                 handle.write(json.dumps(observation, ensure_ascii=False, separators=(",", ":")) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
