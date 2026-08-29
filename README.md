@@ -69,6 +69,7 @@ Key differences from generic autoresearch:
 - deterministic health probe (`health` CLI) and durable alert-ledger primitives for local/mock validation;
 - standard-library `ml-health-sentinel.py` bundled for isolated final-host probes;
 - injectable monitor control adapters for lease expiry/re-auth gates, overlap decisions, and notification routing;
+- bounded notification delivery retry/timeout bridge with no secret or evidence-path payloads;
 - no generic SSH, jump-host, or scheduler adapter: the agent bootstraps the bundle through the
   project's existing access path and starts it in remote tmux/Slurm.
 

@@ -110,6 +110,47 @@ describe('deterministic ML health observation', () => {
     );
   });
 
+  it('fails closed for malformed runtime observations', () => {
+    const malformedDisk = observeHealth(
+      policy,
+      input({ disk: { availableBytes: Number.NaN, availablePercent: 50, availableInodes: 1000 } })
+    );
+    expect(malformedDisk.state).toBe('unknown');
+    expect(malformedDisk.evidence.map((item) => item.reasonCode)).toContain(
+      'observation-unavailable'
+    );
+
+    const missingExecutor = observeHealth(
+      policy,
+      input({ executor: undefined as unknown as HealthInput['executor'] })
+    );
+    expect(missingExecutor.state).toBe('unknown');
+    expect(missingExecutor.evidence.map((item) => item.reasonCode)).toContain(
+      'observation-unavailable'
+    );
+  });
+
+  it('rejects malformed health policy and progress timestamps', () => {
+    expect(() =>
+      observeHealth({ ...policy, stale: { warningMs: 20, confirmationMs: 10 } }, input())
+    ).toThrow('confirmationMs must be >= stale.warningMs');
+    expect(() =>
+      observeHealth(
+        { ...policy, disk: { ...policy.disk, criticalBytes: Number.POSITIVE_INFINITY } },
+        input()
+      )
+    ).toThrow('finite numbers');
+
+    const malformedProgress = observeHealth(
+      policy,
+      input({ progress: { ...input().progress!, timestampMs: Number.NaN } })
+    );
+    expect(malformedProgress.state).toBe('unknown');
+    expect(malformedProgress.evidence.map((item) => item.reasonCode)).toContain(
+      'observation-unavailable'
+    );
+  });
+
   it('requires terminal contract, artifacts, reconcile, and rank exit for completed', () => {
     const result = observeHealth(
       policy,

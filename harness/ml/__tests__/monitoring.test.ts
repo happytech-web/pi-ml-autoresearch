@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildMinimalNotification,
+  deliverNotification,
   dispatchNotification,
   establishConnectionLease,
   reuseConnectionLease,
@@ -178,15 +179,60 @@ describe('monitor control adapters', () => {
       },
     };
     await expect(
-      dispatchNotification(
-        adapter,
-        path.join(dir, 'alerts.jsonl'),
-        alertPolicy,
-        observation,
-        100
-      )
+      dispatchNotification(adapter, path.join(dir, 'alerts.jsonl'), alertPolicy, observation, 100)
     ).rejects.toThrow('notification endpoint unavailable');
     expect(JSON.stringify(observation)).toBe(before);
     expect(fs.existsSync(path.join(dir, 'alerts.jsonl'))).toBe(false);
+  });
+
+  it('retries delivery with bounded exponential backoff', async () => {
+    const observation = healthyObservation();
+    const event = buildMinimalNotification({
+      ...observation,
+      state: 'failed',
+      evidence: [
+        {
+          detector: 'executor',
+          reasonCode: 'executor-not-running',
+          severity: 'critical',
+          confidence: 0.99,
+          detail: 'executor process is not alive',
+        },
+      ],
+    });
+    let attempts = 0;
+    const delays: number[] = [];
+    await deliverNotification(
+      {
+        send: async () => {
+          attempts += 1;
+          if (attempts < 3) throw new Error('temporary endpoint failure');
+        },
+      },
+      event,
+      { maxAttempts: 3, timeoutMs: 100, backoffMs: 5 },
+      async (delayMs) => {
+        delays.push(delayMs);
+      }
+    );
+    expect(attempts).toBe(3);
+    expect(delays).toEqual([5, 10]);
+  });
+
+  it('times out a hung notification adapter and respects the attempt ceiling', async () => {
+    let attempts = 0;
+    await expect(
+      deliverNotification(
+        {
+          send: async () => {
+            attempts += 1;
+            await new Promise(() => undefined);
+          },
+        },
+        buildMinimalNotification(healthyObservation()),
+        { maxAttempts: 2, timeoutMs: 5, backoffMs: 0 }
+      )
+    ).rejects.toThrow('notification delivery timed out');
+    expect(attempts).toBe(2);
   });
 });

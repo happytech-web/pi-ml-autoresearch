@@ -121,6 +121,58 @@ export interface NotificationAdapter {
   send(event: MinimalNotification): Promise<void>;
 }
 
+export interface NotificationDeliveryPolicy {
+  maxAttempts: number;
+  timeoutMs: number;
+  backoffMs: number;
+}
+
+const defaultNotificationDeliveryPolicy: NotificationDeliveryPolicy = {
+  maxAttempts: 1,
+  timeoutMs: 30_000,
+  backoffMs: 0,
+};
+
+export async function deliverNotification(
+  adapter: NotificationAdapter,
+  event: MinimalNotification,
+  policy: NotificationDeliveryPolicy = defaultNotificationDeliveryPolicy,
+  sleep: (delayMs: number) => Promise<void> = (delayMs) =>
+    new Promise((resolve) => setTimeout(resolve, delayMs))
+): Promise<void> {
+  if (!Number.isInteger(policy.maxAttempts) || policy.maxAttempts <= 0) {
+    throw new Error('notification maxAttempts must be a positive integer');
+  }
+  if (!Number.isFinite(policy.timeoutMs) || policy.timeoutMs <= 0) {
+    throw new Error('notification timeoutMs must be positive');
+  }
+  if (!Number.isFinite(policy.backoffMs) || policy.backoffMs < 0) {
+    throw new Error('notification backoffMs must be non-negative');
+  }
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('notification delivery timed out')),
+          policy.timeoutMs
+        );
+      });
+      await Promise.race([adapter.send(event), timeoutPromise]);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < policy.maxAttempts && policy.backoffMs > 0) {
+        await sleep(policy.backoffMs * 2 ** (attempt - 1));
+      }
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 export function buildMinimalNotification(observation: HealthObservation): MinimalNotification {
   const severity: HealthSeverity = observation.evidence.reduce<HealthSeverity>((highest, item) => {
     const rank = { info: 0, warning: 1, critical: 2 } as const;
@@ -144,12 +196,13 @@ export async function dispatchNotification(
   alertFile: string,
   alertPolicy: AlertPolicy,
   observation: HealthObservation,
-  nowMs: number
+  nowMs: number,
+  deliveryPolicy?: NotificationDeliveryPolicy
 ): Promise<{ sent: boolean; decision: string; ledger: AlertLedgerEntry }> {
   const existing = loadAlertLedger(alertFile).get(observation.fingerprint);
   const decision = decideAlert(alertPolicy, observation, nowMs, existing);
   const notification = buildMinimalNotification(observation);
-  if (decision.notify) await adapter.send(notification);
+  if (decision.notify) await deliverNotification(adapter, notification, deliveryPolicy);
   const severity = notification.severity;
   const ledger = appendAlertObservation(
     alertFile,

@@ -152,14 +152,47 @@ function isTerminalVerified(input: HealthInput): boolean {
   );
 }
 
+function finiteNonNegative(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+export function validateHealthPolicy(policy: HealthPolicy): void {
+  const thresholds = [
+    policy?.stale?.warningMs,
+    policy?.stale?.confirmationMs,
+    policy?.sentinelHeartbeatMaxAgeMs,
+    policy?.disk?.warningBytes,
+    policy?.disk?.criticalBytes,
+    policy?.disk?.warningPercent,
+    policy?.disk?.criticalPercent,
+    policy?.disk?.warningInodes,
+    policy?.disk?.criticalInodes,
+  ];
+  if (thresholds.some((value) => !finiteNonNegative(value))) {
+    throw new Error('health policy thresholds must be non-negative finite numbers');
+  }
+  if (policy.stale.confirmationMs < policy.stale.warningMs) {
+    throw new Error('stale.confirmationMs must be >= stale.warningMs');
+  }
+}
+
 export function observeHealth(
   policy: HealthPolicy,
   input: HealthInput,
   previousState?: HealthState
 ): HealthObservation {
+  validateHealthPolicy(policy);
+  if (
+    !finiteNonNegative(input?.nowMs) ||
+    !input.campaignId?.trim() ||
+    !input.runId?.trim() ||
+    !input.attemptId?.trim()
+  ) {
+    throw new Error('campaignId, runId, attemptId and finite nowMs are required');
+  }
   const evidence: HealthEvidence[] = [];
   const heartbeatAge =
-    input.sentinelHeartbeatAtMs === undefined
+    input.sentinelHeartbeatAtMs === undefined || !finiteNonNegative(input.sentinelHeartbeatAtMs)
       ? undefined
       : Math.max(0, input.nowMs - input.sentinelHeartbeatAtMs);
   if (heartbeatAge === undefined || heartbeatAge > policy.sentinelHeartbeatMaxAgeMs) {
@@ -176,7 +209,7 @@ export function observeHealth(
     );
   }
 
-  if (!input.executor.processAlive) {
+  if (input.executor?.processAlive === false) {
     evidence.push(
       evidenceFn(
         'executor',
@@ -186,7 +219,7 @@ export function observeHealth(
         'executor process is not alive'
       )
     );
-  } else if (!input.executor.identityMatches) {
+  } else if (input.executor?.identityMatches === false) {
     evidence.push(
       evidenceFn(
         'executor',
@@ -194,6 +227,16 @@ export function observeHealth(
         'critical',
         0.99,
         'executor identity does not match campaign'
+      )
+    );
+  } else if (input.executor?.processAlive !== true || input.executor?.identityMatches !== true) {
+    evidence.push(
+      evidenceFn(
+        'executor',
+        'observation-unavailable',
+        'warning',
+        0.8,
+        'executor observation unavailable'
       )
     );
   }
@@ -231,6 +274,20 @@ export function observeHealth(
   if (input.disk) {
     const { availableBytes, availablePercent, availableInodes } = input.disk;
     if (
+      !finiteNonNegative(availableBytes) ||
+      !finiteNonNegative(availablePercent) ||
+      !finiteNonNegative(availableInodes)
+    ) {
+      evidence.push(
+        evidenceFn(
+          'disk',
+          'observation-unavailable',
+          'warning',
+          0.8,
+          'disk observation is malformed'
+        )
+      );
+    } else if (
       availableBytes <= policy.disk.criticalBytes ||
       availablePercent <= policy.disk.criticalPercent
     ) {
@@ -279,8 +336,24 @@ export function observeHealth(
   }
 
   if (input.progress) {
-    const age = Math.max(0, input.nowMs - input.progress.timestampMs);
-    if (age >= policy.stale.confirmationMs && (input.staleProbeCount ?? 0) >= 2) {
+    const timestamp = input.progress.timestampMs;
+    if (!finiteNonNegative(timestamp)) {
+      evidence.push(
+        evidenceFn(
+          'progress-contract',
+          'observation-unavailable',
+          'warning',
+          0.8,
+          'progress timestamp unavailable'
+        )
+      );
+    }
+    const age = finiteNonNegative(timestamp) ? Math.max(0, input.nowMs - timestamp) : 0;
+    if (
+      finiteNonNegative(timestamp) &&
+      age >= policy.stale.confirmationMs &&
+      (input.staleProbeCount ?? 0) >= 2
+    ) {
       evidence.push(
         evidenceFn('progress-stale', 'progress-stale', 'critical', 0.9, `progress age ${age}ms`)
       );
