@@ -98,7 +98,7 @@ function stableJson(value: unknown): string {
   if (value && typeof value === 'object') {
     return `{${Object.entries(value as Record<string, unknown>)
       .filter(([, item]) => item !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => Buffer.compare(Buffer.from(left), Buffer.from(right)))
       .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
       .join(',')}}`;
   }
@@ -109,13 +109,16 @@ function fingerprint(
   input: Pick<HealthObservation, 'campaignId' | 'runId' | 'attemptId' | 'state' | 'evidence'>
 ): string {
   const normalized = input.evidence
-    .map(({ detector, reasonCode, severity, confidence }) => ({
+    .map(({ detector, reasonCode, severity, confidence, detail }) => ({
       detector,
       reasonCode,
       severity,
       confidence,
+      signature: reasonCode === 'fatal-signature' ? detail : undefined,
     }))
-    .sort((left, right) => stableJson(left).localeCompare(stableJson(right)));
+    .sort((left, right) =>
+      Buffer.compare(Buffer.from(stableJson(left)), Buffer.from(stableJson(right)))
+    );
   return `sha256:${createHash('sha256')
     .update(
       stableJson({

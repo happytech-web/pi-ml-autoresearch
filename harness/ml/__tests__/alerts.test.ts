@@ -104,7 +104,10 @@ describe('durable alert ledger decisions', () => {
 
   it('notifies severity upgrades even inside cooldown', () => {
     const warning = observation(100);
-    const failed = observation(101, ['CUDA out of memory']);
+    const failed = {
+      ...observation(101, ['CUDA out of memory']),
+      fingerprint: warning.fingerprint,
+    };
     const entry = {
       schemaVersion: 1 as const,
       fingerprint: warning.fingerprint,
@@ -123,6 +126,26 @@ describe('durable alert ledger decisions', () => {
       notify: true,
       reason: 'severity-upgraded',
     });
+  });
+
+  it('treats a different fingerprint as a new event', () => {
+    const first = observation(100, ['OOM']);
+    const second = observation(101, ['NCCL error']);
+    const entry = {
+      schemaVersion: 1 as const,
+      fingerprint: first.fingerprint,
+      campaignId: first.campaignId,
+      runId: first.runId,
+      attemptId: first.attemptId,
+      state: first.state,
+      severity: 'critical' as const,
+      firstSeenAtMs: 100,
+      lastSeenAtMs: 100,
+      lastNotifiedAtMs: 100,
+      notificationCount: 1,
+      acked: false,
+    };
+    expect(decideAlert(alertPolicy, second, 101, entry)).toEqual({ notify: true, reason: 'new' });
   });
 
   it('persists latest entries for session restart recovery', () => {
