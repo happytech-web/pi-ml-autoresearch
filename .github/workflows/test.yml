@@ -32,7 +32,17 @@ jobs:
         run: pnpm typecheck
 
       - name: Run tests
+        if: runner.os == 'Linux'
         run: pnpm test
+
+      - name: Run portable tests
+        if: runner.os == 'Windows'
+        shell: bash
+        run: >-
+          pnpm exec vitest run
+          --exclude harness/ml/__tests__/local-runner.test.ts
+          --exclude harness/ml/__tests__/remote-runner.test.ts
+          --exclude harness/ml/__tests__/pty-lease.test.ts
 
       - name: Smoke test CLI launcher
         run: node harness/pi-autoresearch.mjs --help

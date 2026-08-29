@@ -55,6 +55,7 @@ class LeaseDaemon:
         self.lock = threading.RLock()
         self.output = bytearray()
         self.output_condition = threading.Condition(self.lock)
+        self.generation = 0
         self.lease_id = f"lease-{uuid.uuid4()}"
         self.expires_at_ms = now_ms() + self.ttl_ms
         self.status = "starting"
@@ -96,14 +97,17 @@ class LeaseDaemon:
         os.set_blocking(master, False)
         self.status = "active"
         self.persist()
-        self.reader = threading.Thread(target=self._read_output, daemon=True)
+        self.generation += 1
+        generation = self.generation
+        self.reader = threading.Thread(
+            target=self._read_output, args=(generation, master), daemon=True
+        )
         self.reader.start()
 
-    def _read_output(self) -> None:
-        assert self.master_fd is not None
+    def _read_output(self, generation: int, master_fd: int) -> None:
         while not STOP:
             try:
-                data = os.read(self.master_fd, 8192)
+                data = os.read(master_fd, 8192)
             except BlockingIOError:
                 time.sleep(0.01)
                 continue
@@ -116,8 +120,14 @@ class LeaseDaemon:
                 if len(self.output) > 1024 * 1024:
                     del self.output[:-512 * 1024]
                 self.output_condition.notify_all()
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
         with self.lock:
-            if self.status == "active":
+            if self.master_fd == master_fd:
+                self.master_fd = None
+            if generation == self.generation and self.status == "active":
                 self.status = "reauth-required"
                 self.error = "bootstrap PTY exited or relay connection closed"
                 self.persist()
@@ -148,6 +158,7 @@ class LeaseDaemon:
         global STOP
         STOP = True
         with self.lock:
+            self.generation += 1
             self._terminate_child()
             if self.master_fd is not None:
                 try:
@@ -158,6 +169,39 @@ class LeaseDaemon:
             if self.status != "stopped":
                 self.status = "stopped"
                 self.persist()
+
+    def reauthenticate(self) -> None:
+        with self.lock:
+            if self.status != "reauth-required":
+                raise RuntimeError("reauthentication is only allowed for an expired or closed lease")
+            self.generation += 1
+            old_child = self.child
+            self._terminate_child()
+            if self.master_fd is not None:
+                try:
+                    os.close(self.master_fd)
+                except OSError:
+                    pass
+                self.master_fd = None
+            self.child = None
+            if old_child is not None:
+                try:
+                    old_child.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    try:
+                        old_child.kill()
+                    except OSError:
+                        pass
+                    try:
+                        old_child.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        pass
+            self.output.clear()
+            self.lease_id = f"lease-{uuid.uuid4()}"
+            self.expires_at_ms = now_ms() + self.ttl_ms
+            self.status = "starting"
+            self.error = None
+            self.start()
 
     def _send(self, command: str, timeout_ms: int) -> str:
         if len(command) > 16 * 1024:
@@ -206,6 +250,9 @@ class LeaseDaemon:
             return {"ok": True, "output": result, "state": self.state()}
         if action == "stop":
             self.stop()
+            return {"ok": True, "state": self.state()}
+        if action == "reauth":
+            self.reauthenticate()
             return {"ok": True, "state": self.state()}
         raise ValueError("unsupported lease action")
 

@@ -158,8 +158,10 @@ of a Pi session and exposes a `0600` Unix socket for `status`, bounded `probe`, 
 requests. Start it once after the user completes TouchID, then let later monitor sessions call the
 socket through `harness/ml/pty-lease.ts`. The daemon stores only lease metadata, never PTY output or
 credentials. Relay EOF or the 1-2 day TTL changes the state to `reauth-required`; probe requests are
-rejected until the user explicitly starts a fresh daemon/bootstrap. It does not auto-retry TouchID,
-change the campaign queue, or make `pi-background-tasks` persistent.
+rejected until the user explicitly sends a `reauth` request (or starts a fresh daemon/bootstrap).
+`reauth` only restarts the declared bootstrap command and creates a new lease ID; it never simulates
+or retries TouchID without the user's interaction. It does not change the campaign queue or make
+`pi-background-tasks` persistent.
 
 This is a transport lease, not training state. The remote executor and health sentinel remain the
 source of operational evidence; an unavailable lease means the local monitor is `unknown` and must
