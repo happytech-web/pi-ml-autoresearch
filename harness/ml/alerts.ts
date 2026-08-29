@@ -10,9 +10,35 @@ function withAppendLock<T>(file: string, action: () => T): T {
   while (handle === undefined) {
     try {
       handle = fs.openSync(lockFile, 'wx', 0o600);
+      fs.writeFileSync(
+        handle,
+        JSON.stringify({ pid: process.pid, acquiredAtMs: Date.now() }),
+        'utf8'
+      );
+      fs.fsyncSync(handle);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || Date.now() >= deadline) {
         throw new Error(`Could not acquire alert ledger lock: ${file}`);
+      }
+      let ownerAlive: boolean | undefined;
+      try {
+        const owner = JSON.parse(fs.readFileSync(lockFile, 'utf8')) as { pid?: unknown };
+        if (typeof owner.pid === 'number' && Number.isInteger(owner.pid) && owner.pid > 0) {
+          try {
+            process.kill(owner.pid, 0);
+            ownerAlive = true;
+          } catch (probeError) {
+            ownerAlive = (probeError as NodeJS.ErrnoException).code !== 'ESRCH';
+          }
+        }
+      } catch {
+        // A partially written lock is not safe to reclaim; fail closed below.
+      }
+      if (ownerAlive === false) {
+        try {
+          fs.rmSync(lockFile);
+        } catch {}
+        continue;
       }
       const wait = new Int32Array(new SharedArrayBuffer(4));
       Atomics.wait(wait, 0, 0, 5);

@@ -159,6 +159,20 @@ describe('durable alert ledger decisions', () => {
     expect(fs.existsSync(`${file}.lock`)).toBe(false);
   });
 
+  it('takes over a lock left by a crashed notifier when its owner is gone', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-alert-ledger-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'alerts.jsonl');
+    fs.writeFileSync(
+      `${file}.lock`,
+      JSON.stringify({ pid: 99_999_999, acquiredAtMs: Date.now() }),
+      { mode: 0o600 }
+    );
+    const entry = appendAlertObservation(file, observation(100, ['OOM']), 100, true, 'critical');
+    expect(entry.notificationCount).toBe(1);
+    expect(fs.existsSync(`${file}.lock`)).toBe(false);
+  });
+
   it('fails closed on a corrupted ledger instead of inventing alert history', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-alert-ledger-'));
     dirs.push(dir);
