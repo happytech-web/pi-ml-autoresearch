@@ -517,6 +517,7 @@ def run_trial(
         {
             "currentTrialId": trial["trialId"],
             "currentRunId": trial["runId"],
+            "currentRunToken": run_token,
             "updatedAt": started_at,
         }
     )
@@ -565,6 +566,8 @@ def run_trial(
                 {
                     "schemaVersion": 1,
                     "state": "running",
+                    "trialId": trial["trialId"],
+                    "runId": trial["runId"],
                     "pid": active_process.pid,
                     "processGroup": active_process.pid,
                     "processStartTicks": process_start_ticks(active_process.pid),
@@ -620,6 +623,8 @@ def run_trial(
         {
             "schemaVersion": 1,
             "state": "finished",
+            "trialId": trial["trialId"],
+            "runId": trial["runId"],
             "pid": None,
             "processGroup": None,
             "runToken": run_token,
@@ -644,7 +649,14 @@ def run_trial(
         detail=error or "Strict primary metric parsed from metricFile",
         trial=trial,
     )
-    state.update({"currentTrialId": None, "currentRunId": None, "updatedAt": finished_at})
+    state.update(
+        {
+            "currentTrialId": None,
+            "currentRunId": None,
+            "currentRunToken": None,
+            "updatedAt": finished_at,
+        }
+    )
     write_json_atomic(campaign / STATE_FILE, state)
     return event
 
@@ -725,6 +737,7 @@ def refresh_interrupted_state(campaign: Path, state: dict[str, Any]) -> dict[str
                 "stopReason": "Executor exited between trials; run may safely resume",
                 "currentTrialId": None,
                 "currentRunId": None,
+                "currentRunToken": None,
                 "updatedAt": now(),
             }
         )
@@ -774,6 +787,7 @@ def initialize_state(
             "startedAt": events[0]["timestamp"] if events else now(),
             "currentTrialId": None,
             "currentRunId": None,
+            "currentRunToken": None,
         }
         if not events:
             append_event(
@@ -907,6 +921,7 @@ def run_campaign(campaign: Path) -> dict[str, Any]:
             "executorStartTicks": None,
             "currentTrialId": None,
             "currentRunId": None,
+            "currentRunToken": None,
             "updatedAt": now(),
         }
     )

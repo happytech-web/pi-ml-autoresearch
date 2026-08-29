@@ -45,6 +45,9 @@ describe('remote executor health adapter', () => {
     const events = path.join(dir, 'events.jsonl');
     writeJson(state, { status: 'completed', executorPid: null, executorStartTicks: null });
     writeJson(terminal, {
+      campaignId: 'remote-health',
+      runId: 'run-1',
+      attemptId: 'attempt-1',
       contractVerified: true,
       artifactsVerified: true,
       reconcileVerified: true,
@@ -94,6 +97,72 @@ describe('remote executor health adapter', () => {
     const config = path.join(dir, 'adapter.json');
     const output = path.join(dir, 'input.json');
     writeJson(state, { status: 'running', executorPid: 99_999_999, executorStartTicks: 1 });
+    writeJson(config, {
+      campaignId: 'remote-health',
+      runId: 'run-1',
+      attemptId: 'attempt-1',
+      campaignDir: dir,
+    });
+    const result = spawnSync('python3', [adapter, '--config', config, '--output', output], {
+      encoding: 'utf8',
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(fs.readFileSync(output, 'utf8')).executor).toEqual({
+      processAlive: false,
+      identityMatches: false,
+    });
+  });
+
+  it('does not mark a terminal record for another run as expected stopped', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-remote-health-identity-'));
+    dirs.push(dir);
+    const state = path.join(dir, 'remote-state.json');
+    const terminal = path.join(dir, 'terminal.json');
+    const config = path.join(dir, 'adapter.json');
+    const output = path.join(dir, 'input.json');
+    writeJson(state, { status: 'completed', executorPid: null, executorStartTicks: null });
+    writeJson(terminal, {
+      campaignId: 'remote-health',
+      runId: 'different-run',
+      attemptId: 'attempt-1',
+      contractVerified: true,
+      artifactsVerified: true,
+      reconcileVerified: true,
+      allRanksExited: true,
+    });
+    writeJson(config, {
+      campaignId: 'remote-health',
+      runId: 'run-1',
+      attemptId: 'attempt-1',
+      campaignDir: dir,
+      terminalFile: terminal,
+    });
+    const result = spawnSync('python3', [adapter, '--config', config, '--output', output], {
+      encoding: 'utf8',
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(fs.readFileSync(output, 'utf8')).executor).toEqual({
+      processAlive: false,
+      identityMatches: false,
+    });
+  });
+
+  it('requires the configured run identity and run token in active remote state', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-remote-health-running-'));
+    dirs.push(dir);
+    const state = path.join(dir, 'remote-state.json');
+    const statusDir = path.join(dir, 'remote-runs', 'run-1');
+    const status = path.join(statusDir, 'status.json');
+    const config = path.join(dir, 'adapter.json');
+    const output = path.join(dir, 'input.json');
+    fs.mkdirSync(statusDir, { recursive: true });
+    writeJson(state, {
+      status: 'running',
+      currentRunId: 'different-run',
+      executorPid: 99_999_999,
+      executorStartTicks: 1,
+    });
+    writeJson(status, { state: 'running', runId: 'run-1', runToken: 'token' });
     writeJson(config, {
       campaignId: 'remote-health',
       runId: 'run-1',

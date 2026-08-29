@@ -282,6 +282,25 @@ def read_json(file: Path) -> dict[str, Any]:
     return value
 
 
+def fallback_identity(adapter_config: Path | None) -> dict[str, str]:
+    """Keep only an independently declared identity when an adapter cannot refresh."""
+    candidates: list[dict[str, Any]] = []
+    if adapter_config is not None:
+        try:
+            configured = read_json(adapter_config)
+            candidates.append(configured)
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+    for candidate in candidates:
+        identity = {
+            key: candidate.get(key)
+            for key in ("campaignId", "runId", "attemptId")
+        }
+        if all(isinstance(value, str) and value.strip() for value in identity.values()):
+            return identity
+    raise ValueError("adapter refresh failed and no valid campaign identity is available")
+
+
 def probe(args: argparse.Namespace) -> dict[str, Any]:
     output = args.output.expanduser().resolve()
     events = args.events.expanduser().resolve()
@@ -292,7 +311,7 @@ def probe(args: argparse.Namespace) -> dict[str, Any]:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
         previous = read_json(output) if output.exists() else None
         previous_state = previous.get("state") if previous else None
-        payload = read_json(args.input)
+        payload: dict[str, Any]
         if args.adapter:
             adapter_command = [
                 sys.executable,
@@ -314,14 +333,19 @@ def probe(args: argparse.Namespace) -> dict[str, Any]:
             except (OSError, subprocess.TimeoutExpired):
                 adapter_result = None
             if adapter_result is None or adapter_result.returncode != 0:
-                # Preserve run identity but invalidate all signals when the adapter cannot refresh.
-                payload["nowMs"] = now_ms()
-                payload["sentinelHeartbeatAtMs"] = None
-                payload["executor"] = {}
-                payload.pop("progress", None)
-                payload.pop("disk", None)
+                # Preserve only identity and invalidate every observation when refresh fails.
+                payload = fallback_identity(args.adapter_config)
+                payload.update(
+                    {
+                        "nowMs": now_ms(),
+                        "sentinelHeartbeatAtMs": None,
+                        "executor": {},
+                    }
+                )
             else:
                 payload = read_json(args.input)
+        else:
+            payload = read_json(args.input)
         observation = observe_health(read_json(args.policy), payload, previous_state)
         write_json_atomic(output, observation)
         previous_fingerprint = previous.get("fingerprint") if previous else None

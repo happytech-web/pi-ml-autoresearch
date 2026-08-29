@@ -11,6 +11,7 @@ import {
 
 const dirs: string[] = [];
 const tick = path.resolve('harness/ml-monitor-tick.mjs');
+const bridge = path.resolve('harness/ml-monitor-bridge.mjs');
 const itOnPosix = process.platform === 'win32' ? it.skip : it;
 
 afterEach(() => {
@@ -222,5 +223,87 @@ describe('launchd-compatible monitor tick entrypoint', () => {
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({ ran: false, reason: 'not-due' });
     expect(fs.existsSync(marker)).toBe(false);
+  });
+
+  it('chains the due tick through the health gate and declared monitor command', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-monitor-chain-'));
+    dirs.push(dir);
+    const scheduleFile = path.join(dir, 'schedule.json');
+    const healthFile = path.join(dir, 'health.json');
+    const marker = path.join(dir, 'monitor.json');
+    createMonitorSchedule(scheduleFile, {
+      campaignId: 'chain-campaign',
+      everyMs: 60_000,
+      nextDueAtMs: Date.now() - 1,
+    });
+    fs.writeFileSync(healthFile, JSON.stringify({ state: 'healthy' }));
+    const monitor = `require('node:fs').writeFileSync(process.env.MARKER, JSON.stringify({state:process.env.PI_ML_MONITOR_STATE,reason:process.env.PI_ML_MONITOR_REASON}))`;
+    const tickArgs = [
+      tick,
+      '--schedule',
+      scheduleFile,
+      '--command',
+      process.execPath,
+      bridge,
+      '--campaign',
+      dir,
+      '--health',
+      healthFile,
+      '--monitor-command',
+      process.execPath,
+      '-e',
+      monitor,
+    ];
+    const healthy = spawnSync(process.execPath, tickArgs, {
+      encoding: 'utf8',
+      env: { ...process.env, MARKER: marker },
+    });
+    expect(healthy.status, healthy.stderr).toBe(0);
+    expect(JSON.parse(healthy.stdout)).toMatchObject({
+      ran: true,
+      reason: 'due',
+    });
+    expect(fs.existsSync(marker)).toBe(false);
+
+    const persisted = readMonitorSchedule(scheduleFile);
+    expect(persisted).not.toBeNull();
+    updateMonitorSchedule(scheduleFile, persisted!.revision, (current) => ({
+      ...current,
+      schedule: { ...current.schedule, nextDueAtMs: Date.now() - 1 },
+    }));
+    fs.writeFileSync(healthFile, '{malformed');
+    const abnormal = spawnSync(process.execPath, tickArgs, {
+      encoding: 'utf8',
+      env: { ...process.env, MARKER: marker },
+    });
+    expect(abnormal.status, abnormal.stderr).toBe(0);
+    expect(JSON.parse(abnormal.stdout)).toMatchObject({
+      ran: true,
+      reason: 'due',
+    });
+    expect(JSON.parse(fs.readFileSync(marker, 'utf8'))).toEqual({
+      state: 'unknown',
+      reason: 'health-input-unavailable',
+    });
+
+    const afterAbnormal = readMonitorSchedule(scheduleFile);
+    expect(afterAbnormal).not.toBeNull();
+    updateMonitorSchedule(scheduleFile, afterAbnormal!.revision, (current) => ({
+      ...current,
+      schedule: { ...current.schedule, nextDueAtMs: Date.now() - 1 },
+    }));
+    const failingMonitorArgs = [...tickArgs];
+    failingMonitorArgs[failingMonitorArgs.length - 1] = 'process.exit(7)';
+    const failed = spawnSync(process.execPath, failingMonitorArgs, {
+      encoding: 'utf8',
+      env: { ...process.env, MARKER: marker },
+    });
+    expect(failed.status).toBe(2);
+    expect(JSON.parse(failed.stdout)).toMatchObject({
+      ran: true,
+      reason: 'due',
+      runnerError: 'monitor runner exited with code 1',
+    });
+    expect(readMonitorSchedule(scheduleFile)?.schedule.activeUntilMs).toBeUndefined();
   });
 });

@@ -52,6 +52,17 @@ def required_string(config: dict[str, Any], key: str) -> str:
     return value
 
 
+def exact_identity(value: Any, campaign_id: str, run_id: str, attempt_id: str) -> bool:
+    return isinstance(value, dict) and all(
+        value.get(key) == expected
+        for key, expected in (
+            ("campaignId", campaign_id),
+            ("runId", run_id),
+            ("attemptId", attempt_id),
+        )
+    )
+
+
 def process_start_ticks(pid: int) -> int | None:
     try:
         stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
@@ -135,11 +146,35 @@ def build_input(config: dict[str, Any]) -> dict[str, Any]:
         status = state.get("status")
         pid = state.get("executorPid")
         ticks = state.get("executorStartTicks")
-        if status == "running" and isinstance(pid, int) and isinstance(ticks, int):
-            process_alive = process_start_ticks(pid) is not None
+        configured_run_status = config.get("runStatusFile")
+        run_status_file = (
+            Path(configured_run_status).expanduser()
+            if isinstance(configured_run_status, str)
+            else campaign / "remote-runs" / run_id / "status.json"
+        )
+        run_status = read_object(run_status_file)
+        run_status_matches = (
+            isinstance(run_status, dict)
+            and run_status.get("runId") == run_id
+            and run_status.get("state") == "running"
+            and isinstance(run_status.get("runToken"), str)
+            and bool(run_status["runToken"])
+            and state.get("currentRunToken") == run_status.get("runToken")
+        )
+        if status == "running":
+            process_alive = (
+                isinstance(pid, int)
+                and isinstance(ticks, int)
+                and process_start_ticks(pid) is not None
+            )
             result["executor"] = {
                 "processAlive": process_alive,
-                "identityMatches": process_alive and process_identity_matches(pid, ticks, campaign),
+                "identityMatches": (
+                    process_alive
+                    and state.get("currentRunId") == run_id
+                    and run_status_matches
+                    and process_identity_matches(pid, ticks, campaign)
+                ),
             }
         elif status in TERMINAL_CAMPAIGN_STATES:
             result["executor"] = {
@@ -148,7 +183,7 @@ def build_input(config: dict[str, Any]) -> dict[str, Any]:
             }
             terminal_file = config.get("terminalFile")
             terminal = read_object(Path(terminal_file).expanduser()) if isinstance(terminal_file, str) else None
-            if terminal and all(
+            if exact_identity(terminal, campaign_id, run_id, attempt_id) and all(
                 terminal.get(key) is True
                 for key in ("contractVerified", "artifactsVerified", "reconcileVerified", "allRanksExited")
             ):

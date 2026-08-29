@@ -32,6 +32,12 @@ terminal campaign intentionally has no executor process, the adapter may emit
 `"expectedStopped": true` only when an independently verified terminal record proves that all
 training ranks exited and the artifact/reconcile gates passed.
 
+The bundled remote adapter applies this rule to the executor state files as follows: a `running`
+observation must match `remote-state.json.currentRunId` and
+`remote-state.json.currentRunToken`; the selected `remote-runs/<runId>/status.json` must contain
+the same `runId`, the same non-empty `runToken`, and `state: "running"`. A terminal record used for `expectedStopped` must include the exact
+`campaignId`, `runId`, and `attemptId`; matching gate booleans alone are not sufficient.
+
 ## Signal mapping
 
 | Source                         | Adapter evidence                                                    | Failure behavior                                                                  |
