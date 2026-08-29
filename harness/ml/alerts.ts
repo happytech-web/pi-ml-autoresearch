@@ -49,6 +49,7 @@ export function decideAlert(
   existing?: AlertLedgerEntry
 ): AlertDecision {
   if (!existing) return { notify: true, reason: 'new' };
+  if (existing.fingerprint !== observation.fingerprint) return { notify: true, reason: 'new' };
   const currentSeverity = observation.evidence.reduce<HealthSeverity>(
     (highest, item) =>
       severityRank[item.severity] > severityRank[highest] ? item.severity : highest,
