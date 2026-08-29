@@ -112,6 +112,9 @@ it('packs the standard-library health sentinel alongside the remote executor', (
   packRemoteBundle(configFile, [trialFile], bundle);
   expect(fs.statSync(path.join(bundle, 'ml-health-sentinel.py')).mode & 0o111).toBeGreaterThan(0);
   expect(fs.statSync(path.join(bundle, 'ml-health-adapter.py')).mode & 0o111).toBeGreaterThan(0);
+  expect(
+    fs.statSync(path.join(bundle, 'ml-remote-health-adapter.py')).mode & 0o111
+  ).toBeGreaterThan(0);
 });
 
 async function waitFor(check: () => boolean, timeoutMs = 3000): Promise<void> {

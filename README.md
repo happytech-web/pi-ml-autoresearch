@@ -68,11 +68,14 @@ Key differences from generic autoresearch:
 - full-lifetime single-writer lock and confirmed process-group cleanup on the final host;
 - deterministic health probe (`health` CLI) and durable alert-ledger primitives for local/mock validation;
 - standard-library `ml-health-adapter.py` for declared progress/executor/terminal/filesystem/log inputs;
+- Linux reference `ml-remote-health-adapter.py` for read-only remote-executor PID/start identity and
+  terminal-state mapping; scheduler/GPU-specific adapters remain project-owned;
 - standard-library `ml-health-sentinel.py` bundled for isolated final-host probes;
 - injectable monitor control adapters for lease expiry/re-auth gates, overlap decisions, and notification routing;
 - bounded notification delivery retry/timeout bridge with no secret or evidence-path payloads;
 - standard-library HTTP notification adapter for ntfy/Gotify-compatible webhooks, with env-only
   bearer secret loading and endpoint/timeout validation;
+- explicit env-only ntfy and Gotify channel wrappers with service-specific payload and auth headers;
 - optional user-owned Python PTY lease daemon for reusing one interactive bootstrap (for example
   `blogin.py`) across Pi sessions; relay EOF/TTL enters an explicit re-auth gate and never auto-retries;
 - launchd-compatible `ml-monitor-tick.mjs` entrypoint that gates an external monitor argv bridge with

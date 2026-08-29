@@ -7,8 +7,11 @@ export interface HttpNotificationOptions {
   endpoint: string;
   token?: string;
   tokenEnv?: string;
+  tokenHeader?: string;
+  tokenPrefix?: string;
   timeoutMs?: number;
   headers?: Record<string, string>;
+  body?: (event: MinimalNotification) => unknown;
 }
 
 function resolveToken(options: HttpNotificationOptions): string | undefined {
@@ -34,7 +37,9 @@ export function createHttpNotificationAdapter(
     'content-type': 'application/json',
     ...options.headers,
   };
-  if (token) headers.authorization = `Bearer ${token}`;
+  if (token) {
+    headers[options.tokenHeader ?? 'authorization'] = `${options.tokenPrefix ?? 'Bearer '}${token}`;
+  }
   return {
     send: (event: MinimalNotification) =>
       new Promise<void>((resolve, reject) => {
@@ -55,7 +60,7 @@ export function createHttpNotificationAdapter(
           request.destroy(new Error('notification delivery timed out'))
         );
         request.once('error', reject);
-        request.end(JSON.stringify(event));
+        request.end(JSON.stringify(options.body ? options.body(event) : event));
       }),
   };
 }

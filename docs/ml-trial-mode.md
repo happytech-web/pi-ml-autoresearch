@@ -180,11 +180,20 @@ checkpoint contracts must provide and test a project-specific adapter on top of 
 See [ml-health-adapter-contract.md](ml-health-adapter-contract.md) for the required identity,
 terminal, Slurm/tmux, multi-rank, GPU, artifact, and mock-test rules.
 
+Remote bundles also include `ml-remote-health-adapter.py`, a Linux-only reference for the bundled
+`remote-executor.py`. Configure it with `campaignDir`, `campaignId`, `runId`, and `attemptId`, plus
+the optional progress/terminal/disk/log paths, and write its output to the sentinel input file. It
+does read-only PID/start-time/argv/campaign checks; it does not query or mutate Slurm, tmux, GPUs, or
+the training queue.
+
 For a declared webhook channel, `harness/ml/http-notification.ts` provides a minimal HTTP adapter.
 Use an `http://` endpoint only for an explicitly isolated local network; production endpoints should
 use `https://`. Credentials are read from `tokenEnv` and sent as a bearer header, never copied into
 the notification event, ledger, bundle, or prompt. Delivery timeout/non-2xx errors remain delivery
 errors and must not be converted into health state or experiment decisions.
+For ntfy or Gotify, use the wrappers in `harness/ml/notification-channels.ts`. They format each
+service's payload and load the bearer/key secret only from `tokenEnv`; do not put a token in the
+endpoint, campaign files, launchd plist, or prompt.
 
 ### Scheduler bridge
 
