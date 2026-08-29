@@ -176,6 +176,12 @@ than being inferred healthy. A sentinel can invoke it before every probe with `-
 or interpret metric quality. Projects using Slurm, tmux, multi-rank launchers, GPU/NVML, or custom
 checkpoint contracts must provide and test a project-specific adapter on top of this schema.
 
+For a declared webhook channel, `harness/ml/http-notification.ts` provides a minimal HTTP adapter.
+Use an `http://` endpoint only for an explicitly isolated local network; production endpoints should
+use `https://`. Credentials are read from `tokenEnv` and sent as a bearer header, never copied into
+the notification event, ledger, bundle, or prompt. Delivery timeout/non-2xx errors remain delivery
+errors and must not be converted into health state or experiment decisions.
+
 ### Scheduler bridge
 
 `harness/ml-monitor-tick.mjs` is the external-launcher boundary for periodic monitoring. A launchd
