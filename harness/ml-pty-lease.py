@@ -235,7 +235,14 @@ class LeaseDaemon:
             if self.status != "active" or self.master_fd is None:
                 raise RuntimeError("connection lease is not active; explicit reauthentication required")
             marker = f"__PI_ML_LEASE_{uuid.uuid4().hex}__"
-            payload = f"{command}; printf '\\n{marker}\\n'\n".encode("utf-8")
+            # Split the marker across printf arguments so an interactive shell's
+            # command echo cannot contain the complete marker before execution.
+            split_at = len(marker) // 2
+            marker_left = marker[:split_at]
+            marker_right = marker[split_at:]
+            payload = (
+                f"{command}; printf '\\n%s%s\\n' '{marker_left}' '{marker_right}'\n"
+            ).encode("utf-8")
             os.write(self.master_fd, payload)
             deadline = time.monotonic() + timeout_ms / 1000
             marker_bytes = marker.encode("utf-8")

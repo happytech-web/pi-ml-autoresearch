@@ -30,7 +30,9 @@ describe('durable monitor schedule bridge', () => {
     const file = path.join(dir, 'monitor.json');
     const created = createMonitorSchedule(file, schedule());
     expect(created.revision).toBe(0);
-    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    }
     expect(readMonitorSchedule(file)).toEqual(created);
 
     const updated = updateMonitorSchedule(file, 0, (current) => ({

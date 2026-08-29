@@ -177,7 +177,9 @@ describe('monitor control adapters', () => {
     dirs.push(dir);
     const file = path.join(dir, 'lease.json');
     establishConnectionLease(file, 'campaign-monitor', 100, 50, 'ssh-control-master');
-    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    }
     fs.writeFileSync(file, '{"schemaVersion":1,"campaignId":');
     expect(() => reuseConnectionLease(file, 'campaign-monitor', 110)).toThrow();
     expect(fs.readFileSync(file, 'utf8')).toBe('{"schemaVersion":1,"campaignId":');
