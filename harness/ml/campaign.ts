@@ -15,6 +15,7 @@ import type {
 const CONFIG_FILE = 'search.json';
 const EVENTS_FILE = 'events.jsonl';
 const WRITE_LOCK = '.campaign-write.lock';
+const WRITE_LOCK_OWNER = 'owner.json';
 
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -56,18 +57,46 @@ export function trialContractHash(trial: MlTrialSpec): string {
 
 function withWriteLock<T>(campaignDir: string, operation: () => T): T {
   const lock = path.join(campaignDir, WRITE_LOCK);
-  try {
-    fs.mkdirSync(lock);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+  while (true) {
+    try {
+      fs.mkdirSync(lock, { mode: 0o700 });
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      let ownerAlive: boolean | undefined;
+      try {
+        const owner = JSON.parse(fs.readFileSync(path.join(lock, WRITE_LOCK_OWNER), 'utf8')) as {
+          pid?: unknown;
+        };
+        if (typeof owner.pid === 'number' && Number.isInteger(owner.pid) && owner.pid > 0) {
+          try {
+            process.kill(owner.pid, 0);
+            ownerAlive = true;
+          } catch (probeError) {
+            ownerAlive = (probeError as NodeJS.ErrnoException).code !== 'ESRCH';
+          }
+        }
+      } catch {
+        // A partial or malformed owner record cannot be safely reclaimed.
+      }
+      if (ownerAlive === false) {
+        try {
+          fs.rmSync(lock, { recursive: true });
+        } catch {}
+        continue;
+      }
       throw new Error(`Campaign is busy or requires lock recovery: ${lock}`);
     }
-    throw error;
   }
   try {
+    fs.writeFileSync(
+      path.join(lock, WRITE_LOCK_OWNER),
+      `${JSON.stringify({ pid: process.pid, acquiredAtMs: Date.now() })}\n`,
+      { encoding: 'utf8', mode: 0o600 }
+    );
     return operation();
   } finally {
-    fs.rmdirSync(lock);
+    fs.rmSync(lock, { recursive: true, force: true });
   }
 }
 
