@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createMonitorSchedule,
   readMonitorSchedule,
+  runDueMonitorSchedule,
   updateMonitorSchedule,
 } from '../schedule-store.js';
 
@@ -68,5 +69,60 @@ describe('durable monitor schedule bridge', () => {
       })
     );
     expect(() => readMonitorSchedule(file)).toThrow('everyMs must be positive');
+  });
+
+  it('runs one due tick, records runner failure, and advances catch-up time', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-schedule-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'monitor.json');
+    createMonitorSchedule(file, schedule());
+    const result = await runDueMonitorSchedule(file, 100, async () => {
+      throw new Error('monitor child crashed');
+    });
+    expect(result).toEqual({
+      ran: true,
+      reason: 'due',
+      revision: 2,
+      runnerError: 'monitor child crashed',
+    });
+    expect(readMonitorSchedule(file)?.schedule.nextDueAtMs).toBe(30_100);
+    expect(readMonitorSchedule(file)?.schedule.activeUntilMs).toBeUndefined();
+  });
+
+  it('serializes overlapping ticks so only one runner starts', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-schedule-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'monitor.json');
+    createMonitorSchedule(file, schedule());
+    let calls = 0;
+    const runner = async () => {
+      calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    };
+    const results = await Promise.all([
+      runDueMonitorSchedule(file, 100, runner),
+      runDueMonitorSchedule(file, 100, runner),
+    ]);
+    expect(calls).toBe(1);
+    expect(results.filter((result) => result.ran)).toHaveLength(1);
+    expect(results.filter((result) => !result.ran)).toHaveLength(1);
+    expect(results.find((result) => !result.ran)?.reason).toBe('not-due');
+  });
+
+  it('does not launch paused or completed schedules', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-schedule-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'monitor.json');
+    createMonitorSchedule(file, schedule());
+    updateMonitorSchedule(file, 0, (current) => ({ ...current, status: 'paused' }));
+    const paused = await runDueMonitorSchedule(file, 100, async () => {
+      throw new Error('must not run');
+    });
+    expect(paused).toEqual({ ran: false, reason: 'paused' });
+    updateMonitorSchedule(file, 1, (current) => ({ ...current, status: 'completed' }));
+    const completed = await runDueMonitorSchedule(file, 100, async () => {
+      throw new Error('must not run');
+    });
+    expect(completed).toEqual({ ran: false, reason: 'completed' });
   });
 });

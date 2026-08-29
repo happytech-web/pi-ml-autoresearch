@@ -12,6 +12,10 @@ export interface PersistedMonitorSchedule {
   schedule: MonitorSchedule;
 }
 
+export type ScheduleTickResult =
+  | { ran: false; reason: 'missing' | 'paused' | 'completed' | 'not-due' | 'overlap-skip' }
+  | { ran: true; reason: 'due'; revision: number; runnerError?: string };
+
 function validateSchedule(schedule: MonitorSchedule): void {
   if (!schedule || typeof schedule.campaignId !== 'string' || !schedule.campaignId.trim()) {
     throw new Error('schedule campaignId is required');
@@ -81,4 +85,71 @@ export function updateMonitorSchedule(
   writeJsonAtomic(file, persisted);
   fs.chmodSync(file, 0o600);
   return persisted;
+}
+
+async function acquireLock(file: string, timeoutMs = 2_000): Promise<() => void> {
+  const lockFile = `${file}.lock`;
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      const handle = fs.openSync(lockFile, 'wx', 0o600);
+      return () => {
+        fs.closeSync(handle);
+        fs.rmSync(lockFile, { force: true });
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || Date.now() >= deadline) {
+        throw new Error(`Could not acquire monitor schedule lock: ${file}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+}
+
+export async function runDueMonitorSchedule(
+  file: string,
+  nowMs: number,
+  runner: () => Promise<void>,
+  lockTimeoutMs = 2_000
+): Promise<ScheduleTickResult> {
+  const release = await acquireLock(file, lockTimeoutMs);
+  try {
+    const current = readMonitorSchedule(file);
+    if (!current) return { ran: false, reason: 'missing' };
+    if (current.status === 'paused') return { ran: false, reason: 'paused' };
+    if (current.status === 'completed') return { ran: false, reason: 'completed' };
+    if (nowMs < current.schedule.nextDueAtMs) return { ran: false, reason: 'not-due' };
+    if (current.schedule.activeUntilMs !== undefined && nowMs < current.schedule.activeUntilMs) {
+      return { ran: false, reason: 'overlap-skip' };
+    }
+    const started = updateMonitorSchedule(file, current.revision, (value) => ({
+      ...value,
+      schedule: { ...value.schedule, activeUntilMs: nowMs + value.schedule.everyMs },
+    }));
+    let runnerError: string | undefined;
+    try {
+      await runner();
+    } catch (error) {
+      runnerError = error instanceof Error ? error.message : String(error);
+    }
+    const finished = updateMonitorSchedule(file, started.revision, (value) => ({
+      ...value,
+      schedule: {
+        ...value.schedule,
+        nextDueAtMs: Math.max(
+          value.schedule.nextDueAtMs + value.schedule.everyMs,
+          nowMs + value.schedule.everyMs
+        ),
+        activeUntilMs: undefined,
+      },
+    }));
+    return {
+      ran: true,
+      reason: 'due',
+      revision: finished.revision,
+      ...(runnerError ? { runnerError } : {}),
+    };
+  } finally {
+    release();
+  }
 }

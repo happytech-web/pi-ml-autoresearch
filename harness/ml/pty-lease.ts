@@ -28,12 +28,16 @@ export function startPtyLeaseDaemon(options: {
   command: string[];
   ttlSeconds?: number;
   probeTimeoutSeconds?: number;
+  allowedProbePrefixes: string[];
 }): ChildProcess {
   const script = options.script ?? new URL('../ml-pty-lease.py', import.meta.url).pathname;
   const args = [script, '--socket', options.socket, '--state', options.state];
   if (options.ttlSeconds !== undefined) args.push('--ttl-seconds', String(options.ttlSeconds));
   if (options.probeTimeoutSeconds !== undefined) {
     args.push('--probe-timeout-seconds', String(options.probeTimeoutSeconds));
+  }
+  for (const prefix of options.allowedProbePrefixes) {
+    args.push('--allowed-probe-prefix', prefix);
   }
   args.push('--command', ...options.command);
   return spawn('python3', args, { stdio: ['ignore', 'ignore', 'pipe'] });

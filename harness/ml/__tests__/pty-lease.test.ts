@@ -30,6 +30,7 @@ describe('independent PTY connection lease daemon', () => {
       command: ['bash', '--noprofile', '--norc', '-i'],
       ttlSeconds: 5,
       probeTimeoutSeconds: 1,
+      allowedProbePrefixes: ['printf'],
     });
     await waitFor(() => fs.existsSync(state));
     const first = await requestPtyLease(socket, { action: 'probe', command: 'printf FIRST' });
@@ -59,6 +60,7 @@ describe('independent PTY connection lease daemon', () => {
       command: ['bash', '--noprofile', '--norc', '-i'],
       ttlSeconds: 0.08,
       probeTimeoutSeconds: 1,
+      allowedProbePrefixes: ['printf'],
     });
     await waitFor(() => fs.existsSync(state));
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -82,12 +84,39 @@ describe('independent PTY connection lease daemon', () => {
       state,
       command: ['bash', '-lc', 'exit 0'],
       ttlSeconds: 5,
+      allowedProbePrefixes: ['printf'],
     });
     await waitFor(() => fs.existsSync(state));
     await waitFor(() => JSON.parse(fs.readFileSync(state, 'utf8')).status === 'reauth-required');
     const response = await requestPtyLease(socket, { action: 'status' });
     expect(response.state.status).toBe('reauth-required');
     expect(response.state.error).toContain('PTY exited');
+    expect((await requestPtyLease(socket, { action: 'stop' })).state.status).toBe('stopped');
+    expect(await new Promise<number | null>((resolve) => daemon.once('exit', resolve))).toBe(0);
+  }, 10_000);
+
+  it('rejects arbitrary commands when no declared probe prefix matches', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-pty-lease-'));
+    dirs.push(dir);
+    const socket = path.join(dir, 'lease.sock');
+    const state = path.join(dir, 'lease.json');
+    const daemon = startPtyLeaseDaemon({
+      socket,
+      state,
+      command: ['bash', '--noprofile', '--norc', '-i'],
+      ttlSeconds: 5,
+      allowedProbePrefixes: ['printf'],
+    });
+    await waitFor(() => fs.existsSync(state));
+    const refused = await requestPtyLease(socket, { action: 'probe', command: 'rm -rf /' });
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toContain('outside the declared allowlist');
+    const injected = await requestPtyLease(socket, {
+      action: 'probe',
+      command: 'printf SAFE; rm -rf /',
+    });
+    expect(injected.ok).toBe(false);
+    expect(injected.error).toContain('shell metacharacters');
     expect((await requestPtyLease(socket, { action: 'stop' })).state.status).toBe('stopped');
     expect(await new Promise<number | null>((resolve) => daemon.once('exit', resolve))).toBe(0);
   }, 10_000);

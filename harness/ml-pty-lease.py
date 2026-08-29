@@ -49,6 +49,7 @@ class LeaseDaemon:
         self.ttl_ms = int(args.ttl_seconds * 1000)
         self.probe_timeout_ms = int(args.probe_timeout_seconds * 1000)
         self.command = args.command
+        self.allowed_probe_prefixes = tuple(args.allowed_probe_prefix or ())
         self.child: subprocess.Popen[bytes] | None = None
         self.master_fd: int | None = None
         self.lock = threading.RLock()
@@ -161,6 +162,16 @@ class LeaseDaemon:
     def _send(self, command: str, timeout_ms: int) -> str:
         if len(command) > 16 * 1024:
             raise ValueError("probe command is too long")
+        if not self.allowed_probe_prefixes:
+            raise PermissionError("no probe command prefixes configured")
+        command_text = command.strip()
+        if any(token in command_text for token in (";", "|", "&", ">", "<", "`", "$", "(", ")")):
+            raise PermissionError("probe command contains shell metacharacters")
+        if not any(
+            command_text == prefix or command_text.startswith(f"{prefix} ")
+            for prefix in self.allowed_probe_prefixes
+        ):
+            raise PermissionError("probe command is outside the declared allowlist")
         with self.output_condition:
             if self.status != "active" or self.master_fd is None:
                 raise RuntimeError("connection lease is not active; explicit reauthentication required")
@@ -254,6 +265,12 @@ def main() -> int:
     parser.add_argument("--state", required=True, type=Path)
     parser.add_argument("--ttl-seconds", type=float, default=172800)
     parser.add_argument("--probe-timeout-seconds", type=float, default=30)
+    parser.add_argument(
+        "--allowed-probe-prefix",
+        action="append",
+        default=[],
+        help="allowed probe command prefix; repeat for multiple status commands",
+    )
     parser.add_argument(
         "--command",
         required=True,
