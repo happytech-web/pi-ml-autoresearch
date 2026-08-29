@@ -192,16 +192,17 @@ def observe_health(policy: dict[str, Any], payload: dict[str, Any], previous_sta
         state = "recovered"
         items.append(evidence("state-machine", "progress-restored", "info", 0.9, "health returned to a valid observable state"))
 
-    normalized = [
-        {
+    normalized = []
+    for item in items:
+        normalized_item = {
             "detector": item["detector"],
             "reasonCode": item["reasonCode"],
             "severity": item["severity"],
             "confidence": item["confidence"],
-            "signature": item["detail"] if item["reasonCode"] == "fatal-signature" else None,
         }
-        for item in items
-    ]
+        if item["reasonCode"] == "fatal-signature":
+            normalized_item["signature"] = item["detail"]
+        normalized.append(normalized_item)
     normalized.sort(key=stable_json)
     result = {
         "schemaVersion": 1,
@@ -212,7 +213,15 @@ def observe_health(policy: dict[str, Any], payload: dict[str, Any], previous_sta
         "state": state,
         "evidence": items,
     }
-    result["fingerprint"] = digest({**result, "evidence": normalized})
+    result["fingerprint"] = digest(
+        {
+            "campaignId": campaign_id,
+            "runId": run_id,
+            "attemptId": attempt_id,
+            "state": state,
+            "evidence": normalized,
+        }
+    )
     return result
 
 

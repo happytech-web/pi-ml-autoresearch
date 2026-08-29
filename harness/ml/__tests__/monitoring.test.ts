@@ -81,6 +81,17 @@ describe('monitor control adapters', () => {
     });
   });
 
+  it('writes private lease state and rejects a corrupt lease without silently reauthing', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-lease-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'lease.json');
+    establishConnectionLease(file, 'campaign-monitor', 100, 50, 'ssh-control-master');
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    fs.writeFileSync(file, '{"schemaVersion":1,"campaignId":');
+    expect(() => reuseConnectionLease(file, 'campaign-monitor', 110)).toThrow();
+    expect(fs.readFileSync(file, 'utf8')).toBe('{"schemaVersion":1,"campaignId":');
+  });
+
   it('skips overlapping schedule ticks and reports due/catch-up ticks', () => {
     const schedule = {
       campaignId: 'campaign-monitor',
@@ -94,6 +105,18 @@ describe('monitor control adapters', () => {
       due: false,
       reason: 'not-due',
     });
+  });
+
+  it('rejects invalid schedule intervals instead of creating a hot loop', () => {
+    const schedule = {
+      campaignId: 'campaign-monitor',
+      everyMs: 0,
+      nextDueAtMs: 100,
+    };
+    expect(() => decideScheduleTick(100, schedule)).toThrow('everyMs must be positive');
+    expect(() =>
+      decideScheduleTick(100, { ...schedule, everyMs: Number.POSITIVE_INFINITY })
+    ).toThrow('everyMs must be positive');
   });
 
   it('builds a minimal notification without evidence details or paths', () => {
@@ -139,5 +162,31 @@ describe('monitor control adapters', () => {
     expect(result.sent).toBe(false);
     expect(result.decision).toBe('normal');
     expect(sent).toHaveLength(0);
+  });
+
+  it('propagates notification delivery failures without mutating health evidence', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-notify-'));
+    dirs.push(dir);
+    const observation = observeHealth(healthPolicy, {
+      ...healthyInput(),
+      executor: { processAlive: false, identityMatches: false },
+    });
+    const before = JSON.stringify(observation);
+    const adapter: NotificationAdapter = {
+      send: async () => {
+        throw new Error('notification endpoint unavailable');
+      },
+    };
+    await expect(
+      dispatchNotification(
+        adapter,
+        path.join(dir, 'alerts.jsonl'),
+        alertPolicy,
+        observation,
+        100
+      )
+    ).rejects.toThrow('notification endpoint unavailable');
+    expect(JSON.stringify(observation)).toBe(before);
+    expect(fs.existsSync(path.join(dir, 'alerts.jsonl'))).toBe(false);
   });
 });

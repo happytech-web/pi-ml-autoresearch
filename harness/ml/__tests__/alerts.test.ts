@@ -157,4 +157,34 @@ describe('durable alert ledger decisions', () => {
     appendAlertObservation(file, first, 105, false, 'critical', entry);
     expect(loadAlertLedger(file).get(first.fingerprint)?.lastSeenAtMs).toBe(105);
   });
+
+  it('fails closed on a corrupted ledger instead of inventing alert history', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-alert-ledger-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'alerts.jsonl');
+    fs.writeFileSync(file, '{"fingerprint":"sha256:broken"}\nnot-json\n');
+    expect(() => loadAlertLedger(file)).toThrow();
+  });
+
+  it('does not escalate an acknowledged fingerprint after a session restart', () => {
+    const first = observation(100, ['OOM']);
+    const entry = {
+      schemaVersion: 1 as const,
+      fingerprint: first.fingerprint,
+      campaignId: first.campaignId,
+      runId: first.runId,
+      attemptId: first.attemptId,
+      state: first.state,
+      severity: 'critical' as const,
+      firstSeenAtMs: 100,
+      lastSeenAtMs: 100,
+      lastNotifiedAtMs: 100,
+      notificationCount: 1,
+      acked: true,
+    };
+    expect(decideAlert(alertPolicy, first, 10_000, entry)).toEqual({
+      notify: false,
+      reason: 'acked',
+    });
+  });
 });
