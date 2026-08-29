@@ -67,6 +67,22 @@ def evidence(
 def validate_policy(policy: dict[str, Any]) -> None:
     stale = policy.get("stale") or {}
     disk = policy.get("disk") or {}
+    required_keys = (
+        "warningMs",
+        "confirmationMs",
+    )
+    if any(key not in stale for key in required_keys):
+        raise ValueError("health policy stale.warningMs and stale.confirmationMs are required")
+    disk_keys = (
+        "warningBytes",
+        "criticalBytes",
+        "warningPercent",
+        "criticalPercent",
+        "warningInodes",
+        "criticalInodes",
+    )
+    if any(key not in disk for key in disk_keys) or "sentinelHeartbeatMaxAgeMs" not in policy:
+        raise ValueError("health policy disk thresholds and sentinelHeartbeatMaxAgeMs are required")
     required = [
         stale.get("warningMs"),
         stale.get("confirmationMs"),

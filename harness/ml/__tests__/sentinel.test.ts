@@ -102,4 +102,13 @@ describe('remote health sentinel mock', () => {
     ).toHaveLength(2);
     expect(fs.existsSync(path.join(dir, 'input.json'))).toBe(true);
   });
+
+  it('fails closed on an incomplete policy without writing health state', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-sentinel-'));
+    dirs.push(dir);
+    const { input, policy } = fixtures();
+    const result = runSentinel(dir, input, { ...policy, disk: undefined });
+    expect(result.status).toBe(2);
+    expect(fs.existsSync(path.join(dir, 'health.json'))).toBe(false);
+  });
 });
