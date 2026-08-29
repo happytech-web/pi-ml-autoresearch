@@ -68,8 +68,10 @@ def evidence(
 
 
 def validate_policy(policy: dict[str, Any]) -> None:
-    stale = policy.get("stale") or {}
-    disk = policy.get("disk") or {}
+    stale_value = policy.get("stale")
+    disk_value = policy.get("disk")
+    stale = stale_value if isinstance(stale_value, dict) else {}
+    disk = disk_value if isinstance(disk_value, dict) else {}
     required_keys = (
         "warningMs",
         "confirmationMs",
@@ -97,8 +99,14 @@ def validate_policy(policy: dict[str, Any]) -> None:
         disk.get("warningInodes"),
         disk.get("criticalInodes"),
     ]
-    if any(isinstance(item, bool) or not isinstance(item, (int, float)) or item < 0 for item in required):
-        raise ValueError("health policy thresholds must be non-negative numbers")
+    if any(
+        isinstance(item, bool)
+        or not isinstance(item, (int, float))
+        or not math.isfinite(item)
+        or item < 0
+        for item in required
+    ):
+        raise ValueError("health policy thresholds must be non-negative finite numbers")
     if stale["confirmationMs"] < stale["warningMs"]:
         raise ValueError("stale.confirmationMs must be >= stale.warningMs")
 
@@ -110,20 +118,35 @@ def terminal_verified(value: Any) -> bool:
     )
 
 
+def finite_non_negative(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
 def observe_health(policy: dict[str, Any], payload: dict[str, Any], previous_state: str | None) -> dict[str, Any]:
     validate_policy(policy)
     now = payload.get("nowMs", now_ms())
-    if isinstance(now, bool) or not isinstance(now, (int, float)):
-        raise ValueError("input.nowMs must be a number")
-    campaign_id = str(payload.get("campaignId", ""))
-    run_id = str(payload.get("runId", ""))
-    attempt_id = str(payload.get("attemptId", ""))
-    if not campaign_id or not run_id or not attempt_id:
+    if not finite_non_negative(now):
+        raise ValueError("input.nowMs must be a finite non-negative number")
+    campaign_value = payload.get("campaignId", "")
+    run_value = payload.get("runId", "")
+    attempt_value = payload.get("attemptId", "")
+    if not all(
+        isinstance(value, str) and value.strip()
+        for value in (campaign_value, run_value, attempt_value)
+    ):
         raise ValueError("campaignId, runId and attemptId are required")
+    campaign_id = campaign_value
+    run_id = run_value
+    attempt_id = attempt_value
 
     items: list[dict[str, Any]] = []
     heartbeat = payload.get("sentinelHeartbeatAtMs")
-    heartbeat_age = None if heartbeat is None else max(0, int(now - heartbeat))
+    heartbeat_age = None if not finite_non_negative(heartbeat) else max(0, now - heartbeat)
     if heartbeat_age is None or heartbeat_age > policy["sentinelHeartbeatMaxAgeMs"]:
         items.append(
             evidence(
@@ -135,7 +158,8 @@ def observe_health(policy: dict[str, Any], payload: dict[str, Any], previous_sta
             )
         )
 
-    executor = payload.get("executor") or {}
+    executor_value = payload.get("executor")
+    executor = executor_value if isinstance(executor_value, dict) else {}
     expected_stopped = executor.get("expectedStopped") is True
     if expected_stopped and executor.get("processAlive") is not False:
         items.append(evidence("executor", "observation-unavailable", "warning", 0.99, "expectedStopped requires executor processAlive=false"))
@@ -146,22 +170,41 @@ def observe_health(policy: dict[str, Any], payload: dict[str, Any], previous_sta
     elif not expected_stopped and (executor.get("processAlive") is not True or executor.get("identityMatches") is not True):
         items.append(evidence("executor", "observation-unavailable", "warning", 0.8, "executor observation unavailable"))
 
-    for signature in payload.get("fatalSignatures") or []:
-        items.append(evidence("log-signature", "fatal-signature", "critical", 0.95, str(signature)))
+    fatal_signatures = payload.get("fatalSignatures")
+    if fatal_signatures is not None and (
+        not isinstance(fatal_signatures, list)
+        or any(not isinstance(signature, str) for signature in fatal_signatures)
+    ):
+        items.append(
+            evidence(
+                "log-signature",
+                "observation-unavailable",
+                "warning",
+                0.8,
+                "fatal signature observation is malformed",
+            )
+        )
+    else:
+        for signature in fatal_signatures or []:
+            items.append(evidence("log-signature", "fatal-signature", "critical", 0.95, signature))
 
     progress = payload.get("progress")
     if not isinstance(progress, dict):
-        items.append(evidence("progress-contract", "observation-unavailable", "warning", 0.8, "progress signal unavailable"))
+        detail = "progress signal unavailable" if "progress" not in payload else "progress observation is malformed"
+        items.append(evidence("progress-contract", "observation-unavailable", "warning", 0.8, detail))
     else:
         if progress.get("runId") != run_id or progress.get("attemptId") != attempt_id:
             items.append(evidence("progress-contract", "observation-unavailable", "critical", 0.99, "progress identity does not match run"))
         if progress.get("finiteMetrics") is False:
             items.append(evidence("progress-contract", "nan-or-inf", "critical", 0.99, "progress metric contains NaN or Inf"))
         timestamp = progress.get("timestampMs")
-        if isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool):
-            age = max(0, int(now - timestamp))
+        if finite_non_negative(timestamp):
+            age = max(0, now - timestamp)
             stale = policy["stale"]
-            if age >= stale["confirmationMs"] and int(payload.get("staleProbeCount", 0)) >= 2:
+            stale_probe_count = payload.get("staleProbeCount", 0)
+            if not isinstance(stale_probe_count, int) or isinstance(stale_probe_count, bool) or stale_probe_count < 0:
+                stale_probe_count = 0
+            if age >= stale["confirmationMs"] and stale_probe_count >= 2:
                 items.append(evidence("progress-stale", "progress-stale", "critical", 0.9, f"progress age {age}ms"))
             elif age >= stale["warningMs"]:
                 items.append(evidence("progress-stale", "progress-stale", "warning", 0.85, f"progress age {age}ms"))
@@ -175,7 +218,7 @@ def observe_health(policy: dict[str, Any], payload: dict[str, Any], previous_sta
         available_bytes = disk.get("availableBytes")
         available_percent = disk.get("availablePercent")
         available_inodes = disk.get("availableInodes")
-        if not all(isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) for value in (available_bytes, available_percent, available_inodes)):
+        if not all(finite_non_negative(value) for value in (available_bytes, available_percent, available_inodes)):
             items.append(evidence("disk", "observation-unavailable", "warning", 0.8, "disk observation is malformed"))
         else:
             thresholds = policy["disk"]
@@ -215,7 +258,7 @@ def observe_health(policy: dict[str, Any], payload: dict[str, Any], previous_sta
         "campaignId": campaign_id,
         "runId": run_id,
         "attemptId": attempt_id,
-        "observedAtMs": int(now),
+        "observedAtMs": now,
         "state": state,
         "evidence": items,
     }

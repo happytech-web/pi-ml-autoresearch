@@ -256,14 +256,33 @@ export function observeHealth(
     );
   }
 
-  for (const signature of input.fatalSignatures ?? []) {
-    evidence.push(evidenceFn('log-signature', 'fatal-signature', 'critical', 0.95, signature));
+  const fatalSignatures: unknown = input.fatalSignatures;
+  if (
+    fatalSignatures !== undefined &&
+    (!Array.isArray(fatalSignatures) ||
+      fatalSignatures.some((signature) => typeof signature !== 'string'))
+  ) {
+    evidence.push(
+      evidenceFn(
+        'log-signature',
+        'observation-unavailable',
+        'warning',
+        0.8,
+        'fatal signature observation is malformed'
+      )
+    );
+  } else {
+    for (const signature of (fatalSignatures ?? []) as string[]) {
+      evidence.push(evidenceFn('log-signature', 'fatal-signature', 'critical', 0.95, signature));
+    }
   }
 
-  if (
-    input.progress &&
-    (input.progress.runId !== input.runId || input.progress.attemptId !== input.attemptId)
-  ) {
+  const progressValue: unknown = input.progress;
+  const progress =
+    progressValue && typeof progressValue === 'object' && !Array.isArray(progressValue)
+      ? (progressValue as HealthInput['progress'])
+      : undefined;
+  if (progress && (progress.runId !== input.runId || progress.attemptId !== input.attemptId)) {
     evidence.push(
       evidenceFn(
         'progress-contract',
@@ -274,7 +293,7 @@ export function observeHealth(
       )
     );
   }
-  if (input.progress?.finiteMetrics === false) {
+  if (progress?.finiteMetrics === false) {
     evidence.push(
       evidenceFn(
         'progress-contract',
@@ -350,8 +369,15 @@ export function observeHealth(
     );
   }
 
-  if (input.progress) {
-    const timestamp = input.progress.timestampMs;
+  if (progress) {
+    const timestamp = progress.timestampMs;
+    const rawStaleProbeCount = input.staleProbeCount;
+    const staleProbeCount =
+      typeof rawStaleProbeCount === 'number' &&
+      Number.isInteger(rawStaleProbeCount) &&
+      rawStaleProbeCount >= 0
+        ? rawStaleProbeCount
+        : 0;
     if (!finiteNonNegative(timestamp)) {
       evidence.push(
         evidenceFn(
@@ -367,7 +393,7 @@ export function observeHealth(
     if (
       finiteNonNegative(timestamp) &&
       age >= policy.stale.confirmationMs &&
-      (input.staleProbeCount ?? 0) >= 2
+      staleProbeCount >= 2
     ) {
       evidence.push(
         evidenceFn('progress-stale', 'progress-stale', 'critical', 0.9, `progress age ${age}ms`)
@@ -384,7 +410,9 @@ export function observeHealth(
         'observation-unavailable',
         'warning',
         0.8,
-        'progress signal unavailable'
+        progressValue === undefined
+          ? 'progress signal unavailable'
+          : 'progress observation is malformed'
       )
     );
   }

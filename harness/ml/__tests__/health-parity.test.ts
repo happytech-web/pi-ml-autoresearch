@@ -121,6 +121,14 @@ describe('TypeScript/Python health implementation parity', () => {
         disk: { availableBytes: 10, availablePercent: 1, availableInodes: 10 },
       }),
     ],
+    [
+      'fails closed on malformed optional signals',
+      input({
+        fatalSignatures: [42] as unknown as string[],
+        progress: 'malformed' as unknown as HealthInput['progress'],
+        staleProbeCount: '2' as unknown as number,
+      }),
+    ],
   ])('produces the same observation for %s', (_name, healthInput) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-health-parity-'));
     dirs.push(dir);
