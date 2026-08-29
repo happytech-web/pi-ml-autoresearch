@@ -150,6 +150,21 @@ multiple jump hosts. The access path remains project-specific. The bundle execut
 after the agent reaches the final Linux training host; it does not implement SSH, `blogin.py`,
 credential renewal, file transfer, or scheduler submission.
 
+### Interactive connection lease (optional)
+
+When the declared access path requires an interactive relay such as `blogin.py`, use the bundled
+`harness/ml-pty-lease.py` as a separate user-owned local process. It owns the relay PTY independently
+of a Pi session and exposes a `0600` Unix socket for `status`, bounded `probe`, and explicit `stop`
+requests. Start it once after the user completes TouchID, then let later monitor sessions call the
+socket through `harness/ml/pty-lease.ts`. The daemon stores only lease metadata, never PTY output or
+credentials. Relay EOF or the 1-2 day TTL changes the state to `reauth-required`; probe requests are
+rejected until the user explicitly starts a fresh daemon/bootstrap. It does not auto-retry TouchID,
+change the campaign queue, or make `pi-background-tasks` persistent.
+
+This is a transport lease, not training state. The remote executor and health sentinel remain the
+source of operational evidence; an unavailable lease means the local monitor is `unknown` and must
+reconcile after re-authentication.
+
 The user-facing workflow stays conversational:
 
 1. The agent grills and locks the complete pilot queue, including any allowed retry run specs.

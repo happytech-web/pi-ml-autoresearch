@@ -70,6 +70,8 @@ Key differences from generic autoresearch:
 - standard-library `ml-health-sentinel.py` bundled for isolated final-host probes;
 - injectable monitor control adapters for lease expiry/re-auth gates, overlap decisions, and notification routing;
 - bounded notification delivery retry/timeout bridge with no secret or evidence-path payloads;
+- optional user-owned Python PTY lease daemon for reusing one interactive bootstrap (for example
+  `blogin.py`) across Pi sessions; relay EOF/TTL enters an explicit re-auth gate and never auto-retries;
 - no generic SSH, jump-host, or scheduler adapter: the agent bootstraps the bundle through the
   project's existing access path and starts it in remote tmux/Slurm.
 
