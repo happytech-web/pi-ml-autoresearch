@@ -78,11 +78,16 @@ Key differences from generic autoresearch:
 - launchd-compatible `ml-monitor-tick.mjs` entrypoint that gates an external monitor argv bridge with
   durable due/overlap state; it does not pretend that `pi-subagents` is a shell CLI or start models on
   normal non-due ticks;
+- health-gated `ml-monitor-bridge.mjs` that starts a fresh monitor command only for degraded, failed,
+  unknown, or unavailable health input, while keeping healthy/completed ticks model-free;
 - no generic SSH, jump-host, or scheduler adapter: the agent bootstraps the bundle through the
   project's existing access path and starts it in remote tmux/Slurm.
 
 See [docs/ml-trial-mode.md](docs/ml-trial-mode.md). Generic `/autoresearch` behavior remains
 unchanged.
+
+Project-specific health adapter requirements and the mock-first verification matrix are documented in
+[docs/ml-health-adapter-contract.md](docs/ml-health-adapter-contract.md).
 
 ### Extension tools
 

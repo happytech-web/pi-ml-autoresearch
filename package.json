@@ -12,6 +12,7 @@
   "files": [
     "extensions",
     "harness",
+    "examples",
     "skills",
     "assets",
     "README.md",

@@ -177,6 +177,8 @@ than being inferred healthy. A sentinel can invoke it before every probe with `-
 `--adapter-config`. The adapter does not run training, execute arbitrary shell, alter queue/config,
 or interpret metric quality. Projects using Slurm, tmux, multi-rank launchers, GPU/NVML, or custom
 checkpoint contracts must provide and test a project-specific adapter on top of this schema.
+See [ml-health-adapter-contract.md](ml-health-adapter-contract.md) for the required identity,
+terminal, Slurm/tmux, multi-rank, GPU, artifact, and mock-test rules.
 
 For a declared webhook channel, `harness/ml/http-notification.ts` provides a minimal HTTP adapter.
 Use an `http://` endpoint only for an explicitly isolated local network; production endpoints should
@@ -201,6 +203,26 @@ result; it is not silently retried as a new experiment. When using `pi-subagents
 bridge should invoke its `schedule.run-due` action through the installed Pi integration. The harness
 does not assume a nonexistent `pi-subagents` shell command and does not call a model for a normal
 non-due tick.
+
+For a bridge that starts a fresh Pi monitor only when health is abnormal, use the bundled health gate:
+
+```bash
+node harness/ml-monitor-bridge.mjs \
+  --campaign /absolute/campaign \
+  --health /absolute/campaign/health.json \
+  --monitor-command pi --no-session -p "Inspect campaign health under the approved monitoring contract."
+```
+
+`healthy`, `recovered`, and `completed` states produce a successful no-op result. `degraded`, `failed`,
+`unknown`, or an unavailable/malformed health file invoke the declared command. The command receives
+`PI_ML_MONITOR_CAMPAIGN`, `PI_ML_MONITOR_HEALTH`, `PI_ML_MONITOR_STATE`, and `PI_ML_MONITOR_REASON` in its
+environment. The bridge does not infer recovery, retry a trial, cancel a process, or mutate search
+configuration; the fresh monitor remains subject to the authority and evidence gates.
+
+On macOS, copy `examples/launchd/com.pi.ml-monitor-tick.plist`, replace all `/ABSOLUTE/PATH/TO/`
+placeholders, validate it with `plutil -lint`, and load it as a user LaunchAgent. `StartInterval` is
+only a wake-up cadence; the persisted schedule and health gate decide whether any monitor process is
+started. Keep the plist and schedule under a user-owned directory with mode `0600` for schedule data.
 
 The user-facing workflow stays conversational:
 
