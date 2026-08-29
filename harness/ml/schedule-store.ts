@@ -93,6 +93,12 @@ async function acquireLock(file: string, timeoutMs = 2_000): Promise<() => void>
   while (true) {
     try {
       const handle = fs.openSync(lockFile, 'wx', 0o600);
+      fs.writeFileSync(
+        handle,
+        JSON.stringify({ pid: process.pid, acquiredAtMs: Date.now() }),
+        'utf8'
+      );
+      fs.fsyncSync(handle);
       return () => {
         fs.closeSync(handle);
         fs.rmSync(lockFile, { force: true });
@@ -100,6 +106,27 @@ async function acquireLock(file: string, timeoutMs = 2_000): Promise<() => void>
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || Date.now() >= deadline) {
         throw new Error(`Could not acquire monitor schedule lock: ${file}`);
+      }
+      let ownerAlive: boolean | undefined;
+      try {
+        const owner = JSON.parse(fs.readFileSync(lockFile, 'utf8')) as { pid?: unknown };
+        if (typeof owner.pid === 'number' && Number.isInteger(owner.pid) && owner.pid > 0) {
+          try {
+            process.kill(owner.pid, 0);
+            ownerAlive = true;
+          } catch (probeError) {
+            if ((probeError as NodeJS.ErrnoException).code === 'ESRCH') ownerAlive = false;
+            else ownerAlive = true;
+          }
+        }
+      } catch {
+        // A partially written lock is not safe to reclaim; fail closed below.
+      }
+      if (ownerAlive === false) {
+        try {
+          fs.rmSync(lockFile);
+        } catch {}
+        continue;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }

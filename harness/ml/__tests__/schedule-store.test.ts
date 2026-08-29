@@ -89,6 +89,21 @@ describe('durable monitor schedule bridge', () => {
     expect(readMonitorSchedule(file)?.schedule.activeUntilMs).toBeUndefined();
   });
 
+  it('takes over a lock left by a crashed launcher when its owner is gone', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-schedule-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'monitor.json');
+    createMonitorSchedule(file, schedule());
+    fs.writeFileSync(
+      `${file}.lock`,
+      JSON.stringify({ pid: 99_999_999, acquiredAtMs: Date.now() }),
+      { mode: 0o600 }
+    );
+    const result = await runDueMonitorSchedule(file, 100, async () => undefined);
+    expect(result).toMatchObject({ ran: true, reason: 'due' });
+    expect(fs.existsSync(`${file}.lock`)).toBe(false);
+  });
+
   it('serializes overlapping ticks so only one runner starts', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-schedule-'));
     dirs.push(dir);

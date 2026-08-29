@@ -107,13 +107,13 @@ describe('independent PTY connection lease daemon', () => {
       socket,
       state,
       command: ['bash', '--noprofile', '--norc', '-i'],
-      ttlSeconds: 0.08,
+      ttlSeconds: 0.5,
       probeTimeoutSeconds: 1,
       allowedProbePrefixes: ['printf'],
     });
     await waitFor(() => fs.existsSync(state));
     const before = await requestPtyLease(socket, { action: 'status' });
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await new Promise((resolve) => setTimeout(resolve, 600));
     expect((await requestPtyLease(socket, { action: 'status' })).state.status).toBe(
       'reauth-required'
     );
