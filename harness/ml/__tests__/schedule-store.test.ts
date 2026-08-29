@@ -109,6 +109,27 @@ describe('durable monitor schedule bridge', () => {
     expect(results.find((result) => !result.ran)?.reason).toBe('not-due');
   });
 
+  it('allows a later launcher to recover an abandoned active window after restart', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-schedule-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'monitor.json');
+    createMonitorSchedule(file, schedule());
+    updateMonitorSchedule(file, 0, (current) => ({
+      ...current,
+      schedule: { ...current.schedule, activeUntilMs: 200 },
+    }));
+    const overlap = await runDueMonitorSchedule(file, 150, async () => {
+      throw new Error('must not overlap');
+    });
+    expect(overlap).toEqual({ ran: false, reason: 'overlap-skip' });
+    let recovered = false;
+    const afterRestart = await runDueMonitorSchedule(file, 200, async () => {
+      recovered = true;
+    });
+    expect(recovered).toBe(true);
+    expect(afterRestart.ran).toBe(true);
+  });
+
   it('does not launch paused or completed schedules', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-schedule-'));
     dirs.push(dir);
