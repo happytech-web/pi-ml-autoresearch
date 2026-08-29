@@ -125,8 +125,8 @@ describe('launchd-compatible monitor tick entrypoint', () => {
         everyMs: 60_000,
         nextDueAtMs: Date.now() - 1,
       });
-      const descendant = `const fs=require('node:fs'); fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`;
-      const parent = `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], {stdio:'ignore'}); setTimeout(() => {}, 10000);`;
+      const descendant = `process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`;
+      const parent = `const fs=require('node:fs'); const child=require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); setTimeout(() => {}, 10000);`;
       const first = spawnSync(
         process.execPath,
         [
