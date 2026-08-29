@@ -72,6 +72,9 @@ Key differences from generic autoresearch:
 - bounded notification delivery retry/timeout bridge with no secret or evidence-path payloads;
 - optional user-owned Python PTY lease daemon for reusing one interactive bootstrap (for example
   `blogin.py`) across Pi sessions; relay EOF/TTL enters an explicit re-auth gate and never auto-retries;
+- launchd-compatible `ml-monitor-tick.mjs` entrypoint that gates an external monitor argv bridge with
+  durable due/overlap state; it does not pretend that `pi-subagents` is a shell CLI or start models on
+  normal non-due ticks;
 - no generic SSH, jump-host, or scheduler adapter: the agent bootstraps the bundle through the
   project's existing access path and starts it in remote tmux/Slurm.
 

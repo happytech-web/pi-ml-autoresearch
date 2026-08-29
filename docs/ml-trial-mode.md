@@ -165,6 +165,24 @@ This is a transport lease, not training state. The remote executor and health se
 source of operational evidence; an unavailable lease means the local monitor is `unknown` and must
 reconcile after re-authentication.
 
+### Scheduler bridge
+
+`harness/ml-monitor-tick.mjs` is the external-launcher boundary for periodic monitoring. A launchd
+job may invoke it with a campaign schedule file and a fully specified argv bridge:
+
+```bash
+node harness/ml-monitor-tick.mjs \
+  --schedule /absolute/campaign/monitor-schedule.json \
+  --command /absolute/path/to/project-monitor-bridge --campaign /absolute/campaign
+```
+
+The tick holds the schedule lock, skips paused/completed/not-due or overlapping work, and advances
+`nextDueAtMs` atomically. A failed bridge is reported with a non-zero exit and retained in the tick
+result; it is not silently retried as a new experiment. When using `pi-subagents`, the declared
+bridge should invoke its `schedule.run-due` action through the installed Pi integration. The harness
+does not assume a nonexistent `pi-subagents` shell command and does not call a model for a normal
+non-due tick.
+
 The user-facing workflow stays conversational:
 
 1. The agent grills and locks the complete pilot queue, including any allowed retry run specs.
