@@ -46,15 +46,21 @@ function runCommand(argv, timeoutMs) {
     });
     let timedOut = false;
     let settled = false;
+    let killTimer;
     const timer = setTimeout(() => {
       timedOut = true;
       signalProcessGroup(child, 'SIGTERM');
-      setTimeout(() => signalProcessGroup(child, 'SIGKILL'), 1_000).unref();
+      killTimer = setTimeout(() => {
+        killTimer = undefined;
+        signalProcessGroup(child, 'SIGKILL');
+      }, 1_000);
     }, timeoutMs);
     const finish = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // Keep the forced group kill alive after a parent exits on SIGTERM.
+      if (!timedOut && killTimer) clearTimeout(killTimer);
       if (error) reject(error);
       else resolve();
     };

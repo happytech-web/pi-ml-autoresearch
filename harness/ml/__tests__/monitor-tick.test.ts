@@ -88,7 +88,7 @@ describe('launchd-compatible monitor tick entrypoint', () => {
         '--command',
         process.execPath,
         '-e',
-        `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'bad'), 300)`)}], { stdio: 'ignore' }); setTimeout(() => {}, 10_000)`,
+        `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`process.on('SIGTERM', () => {}); setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'bad'), 2_000)`)}], { stdio: 'ignore' }); setTimeout(() => {}, 10_000)`,
       ],
       { encoding: 'utf8', timeout: 5_000 }
     );
@@ -99,7 +99,7 @@ describe('launchd-compatible monitor tick entrypoint', () => {
       runnerError: 'monitor runner timed out after 50ms',
     });
     expect(readMonitorSchedule(scheduleFile)?.schedule.activeUntilMs).toBeUndefined();
-    const deadline = Date.now() + 1_000;
+    const deadline = Date.now() + 2_500;
     while (Date.now() < deadline && !fs.existsSync(marker)) {
       // Give a child that escaped the process group enough time to surface.
       await new Promise((resolve) => setTimeout(resolve, 20));
