@@ -53,6 +53,32 @@ describe('deterministic ML health observation', () => {
     expect(result.evidence.map((item) => item.reasonCode)).toContain('executor-not-running');
   });
 
+  it('accepts an explicitly verified stopped executor for a complete run', () => {
+    const result = observeHealth(
+      policy,
+      input({
+        executor: { processAlive: false, identityMatches: false, expectedStopped: true },
+        terminal: {
+          contractVerified: true,
+          artifactsVerified: true,
+          reconcileVerified: true,
+          allRanksExited: true,
+        },
+      })
+    );
+    expect(result.state).toBe('completed');
+    expect(result.evidence).toHaveLength(0);
+  });
+
+  it('fails closed when expectedStopped contradicts executor liveness', () => {
+    const result = observeHealth(
+      policy,
+      input({ executor: { processAlive: true, identityMatches: true, expectedStopped: true } })
+    );
+    expect(result.state).toBe('unknown');
+    expect(result.evidence.map((item) => item.reasonCode)).toContain('observation-unavailable');
+  });
+
   it('fails on explicit fatal signatures and non-finite metrics', () => {
     const result = observeHealth(
       policy,

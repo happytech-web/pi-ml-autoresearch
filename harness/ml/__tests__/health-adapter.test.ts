@@ -75,4 +75,18 @@ describe('project health input adapter contract', () => {
       )
     ).rejects.toThrow('clock must return a finite number');
   });
+
+  it('requires expectedStopped to describe an actually stopped executor', async () => {
+    await expect(
+      readHealthInput(
+        {
+          read: () => ({
+            ...validInput(),
+            executor: { processAlive: true, identityMatches: true, expectedStopped: true },
+          }),
+        },
+        { campaignId: 'campaign-adapter', runId: 'run-1', attemptId: 'attempt-1' }
+      )
+    ).rejects.toThrow('expectedStopped requires processAlive false');
+  });
 });

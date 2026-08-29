@@ -61,6 +61,7 @@ export interface HealthInput {
   executor: {
     processAlive: boolean;
     identityMatches: boolean;
+    expectedStopped?: boolean;
   };
   progress?: ProgressSignal;
   disk?: DiskObservation;
@@ -209,7 +210,18 @@ export function observeHealth(
     );
   }
 
-  if (input.executor?.processAlive === false) {
+  const executorExpectedStopped = input.executor?.expectedStopped === true;
+  if (executorExpectedStopped && input.executor?.processAlive !== false) {
+    evidence.push(
+      evidenceFn(
+        'executor',
+        'observation-unavailable',
+        'warning',
+        0.99,
+        'expectedStopped requires executor processAlive=false'
+      )
+    );
+  } else if (input.executor?.processAlive === false && !executorExpectedStopped) {
     evidence.push(
       evidenceFn(
         'executor',
@@ -219,7 +231,7 @@ export function observeHealth(
         'executor process is not alive'
       )
     );
-  } else if (input.executor?.identityMatches === false) {
+  } else if (input.executor?.identityMatches === false && !executorExpectedStopped) {
     evidence.push(
       evidenceFn(
         'executor',
@@ -229,7 +241,10 @@ export function observeHealth(
         'executor identity does not match campaign'
       )
     );
-  } else if (input.executor?.processAlive !== true || input.executor?.identityMatches !== true) {
+  } else if (
+    !executorExpectedStopped &&
+    (input.executor?.processAlive !== true || input.executor?.identityMatches !== true)
+  ) {
     evidence.push(
       evidenceFn(
         'executor',

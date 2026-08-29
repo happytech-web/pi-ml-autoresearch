@@ -135,11 +135,14 @@ def observe_health(policy: dict[str, Any], payload: dict[str, Any], previous_sta
         )
 
     executor = payload.get("executor") or {}
-    if executor.get("processAlive") is False:
+    expected_stopped = executor.get("expectedStopped") is True
+    if expected_stopped and executor.get("processAlive") is not False:
+        items.append(evidence("executor", "observation-unavailable", "warning", 0.99, "expectedStopped requires executor processAlive=false"))
+    elif executor.get("processAlive") is False and not expected_stopped:
         items.append(evidence("executor", "executor-not-running", "critical", 0.99, "executor process is not alive"))
-    elif executor.get("identityMatches") is False:
+    elif executor.get("identityMatches") is False and not expected_stopped:
         items.append(evidence("executor", "executor-identity-mismatch", "critical", 0.99, "executor identity does not match campaign"))
-    elif executor.get("processAlive") is not True or executor.get("identityMatches") is not True:
+    elif not expected_stopped and (executor.get("processAlive") is not True or executor.get("identityMatches") is not True):
         items.append(evidence("executor", "observation-unavailable", "warning", 0.8, "executor observation unavailable"))
 
     for signature in payload.get("fatalSignatures") or []:

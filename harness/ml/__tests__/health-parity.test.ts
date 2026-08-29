@@ -102,6 +102,18 @@ describe('TypeScript/Python health implementation parity', () => {
   it.each([
     ['healthy', input()],
     [
+      'completed with explicitly stopped executor',
+      input({
+        executor: { processAlive: false, identityMatches: false, expectedStopped: true },
+        terminal: {
+          contractVerified: true,
+          artifactsVerified: true,
+          reconcileVerified: true,
+          allRanksExited: true,
+        },
+      }),
+    ],
+    [
       'failed with fatal and disk evidence',
       input({
         executor: { processAlive: false, identityMatches: false },

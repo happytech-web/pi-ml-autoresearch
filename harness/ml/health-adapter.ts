@@ -38,6 +38,15 @@ export function validateHealthInputPayload(value: unknown): asserts value is Hea
   ) {
     throw new Error('health input executor booleans are required');
   }
+  if (
+    value.executor.expectedStopped !== undefined &&
+    typeof value.executor.expectedStopped !== 'boolean'
+  ) {
+    throw new Error('health input executor expectedStopped must be boolean');
+  }
+  if (value.executor.expectedStopped === true && value.executor.processAlive !== false) {
+    throw new Error('health input executor expectedStopped requires processAlive false');
+  }
   if (value.sentinelHeartbeatAtMs !== undefined && !finiteNumber(value.sentinelHeartbeatAtMs)) {
     throw new Error('health input sentinelHeartbeatAtMs must be finite');
   }

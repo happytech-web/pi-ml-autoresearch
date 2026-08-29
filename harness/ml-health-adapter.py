@@ -107,6 +107,8 @@ def build_input(config: dict[str, Any]) -> dict[str, Any]:
                 "processAlive": executor.get("processAlive"),
                 "identityMatches": executor.get("identityMatches"),
             }
+            if isinstance(executor.get("expectedStopped"), bool):
+                result["executor"]["expectedStopped"] = executor["expectedStopped"]
             if "pid" in executor:
                 result["executor"]["pid"] = executor["pid"]
     if "executor" not in result:
