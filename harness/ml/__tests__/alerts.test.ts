@@ -156,6 +156,7 @@ describe('durable alert ledger decisions', () => {
     const entry = appendAlertObservation(file, first, 100, true, 'critical');
     appendAlertObservation(file, first, 105, false, 'critical', entry);
     expect(loadAlertLedger(file).get(first.fingerprint)?.lastSeenAtMs).toBe(105);
+    expect(fs.existsSync(`${file}.lock`)).toBe(false);
   });
 
   it('fails closed on a corrupted ledger instead of inventing alert history', () => {

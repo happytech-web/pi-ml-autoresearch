@@ -3,6 +3,29 @@ import * as path from 'node:path';
 import { appendLine, ensureDir } from './io.js';
 import type { HealthObservation, HealthSeverity } from './health.js';
 
+function withAppendLock<T>(file: string, action: () => T): T {
+  const lockFile = `${file}.lock`;
+  const deadline = Date.now() + 5_000;
+  let handle: number | undefined;
+  while (handle === undefined) {
+    try {
+      handle = fs.openSync(lockFile, 'wx', 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || Date.now() >= deadline) {
+        throw new Error(`Could not acquire alert ledger lock: ${file}`);
+      }
+      const wait = new Int32Array(new SharedArrayBuffer(4));
+      Atomics.wait(wait, 0, 0, 5);
+    }
+  }
+  try {
+    return action();
+  } finally {
+    fs.closeSync(handle);
+    fs.rmSync(lockFile, { force: true });
+  }
+}
+
 export interface AlertPolicy {
   cooldownMs: number;
   escalationMs: number;
@@ -104,6 +127,6 @@ export function appendAlertObservation(
     acked: previous?.acked ?? false,
   };
   ensureDir(path.dirname(file));
-  appendLine(file, JSON.stringify(entry));
+  withAppendLock(file, () => appendLine(file, JSON.stringify(entry)));
   return entry;
 }
