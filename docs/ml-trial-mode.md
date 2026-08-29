@@ -216,6 +216,12 @@ node harness/ml-monitor-tick.mjs \
   --command /absolute/path/to/project-monitor-bridge --campaign /absolute/campaign
 ```
 
+The tick bounds the bridge process to 15 minutes by default. Set
+`--command-timeout-ms <positive milliseconds>` when a project monitor needs a different ceiling.
+On POSIX hosts the bridge runs in its own process group; a timeout sends `SIGTERM` and then
+`SIGKILL` after a short grace period. A timeout is reported as a failed tick and the schedule's
+active window is released, so a later tick can retry monitoring without starting a training run.
+
 The tick holds the schedule lock, skips paused/completed/not-due or overlapping work, and advances
 `nextDueAtMs` atomically. A failed bridge is reported with a non-zero exit and retained in the tick
 result; it is not silently retried as a new experiment. When using `pi-subagents`, the declared

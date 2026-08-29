@@ -21,14 +21,52 @@ function commandArgs(args) {
   return args.slice(index + 1);
 }
 
-function runCommand(argv) {
+function optionalPositiveNumber(args, name, fallback) {
+  const index = args.indexOf(`--${name}`);
+  if (index < 0) return fallback;
+  const value = Number(args[index + 1]);
+  if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --${name}`);
+  return value;
+}
+
+function signalProcessGroup(child, signal) {
+  if (!child.pid) return;
+  try {
+    if (process.platform === 'win32') child.kill(signal);
+    else process.kill(-child.pid, signal);
+  } catch {}
+}
+
+function runCommand(argv, timeoutMs) {
   return new Promise((resolve, reject) => {
     const [executable, ...args] = argv;
-    const child = spawn(executable, args, { stdio: ['ignore', 'ignore', 'ignore'] });
-    child.once('error', reject);
+    const child = spawn(executable, args, {
+      stdio: ['ignore', 'ignore', 'ignore'],
+      detached: process.platform !== 'win32',
+    });
+    let timedOut = false;
+    let settled = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      signalProcessGroup(child, 'SIGTERM');
+      setTimeout(() => signalProcessGroup(child, 'SIGKILL'), 1_000).unref();
+    }, timeoutMs);
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+    child.once('error', (error) => finish(error));
     child.once('exit', (code, signal) => {
-      if (code === 0) return resolve();
-      reject(new Error(`monitor runner exited with ${signal ?? `code ${code ?? 'unknown'}`}`));
+      if (timedOut) {
+        finish(new Error(`monitor runner timed out after ${timeoutMs}ms`));
+      } else if (code === 0) {
+        finish();
+      } else {
+        finish(new Error(`monitor runner exited with ${signal ?? `code ${code ?? 'unknown'}`}`));
+      }
     });
   });
 }
@@ -36,8 +74,9 @@ function runCommand(argv) {
 async function main() {
   const args = process.argv.slice(2);
   const scheduleFile = path.resolve(flag(args, 'schedule'));
+  const commandTimeoutMs = optionalPositiveNumber(args, 'command-timeout-ms', 15 * 60 * 1000);
   const result = await scheduleStore.runDueMonitorSchedule(scheduleFile, Date.now(), () =>
-    runCommand(commandArgs(args))
+    runCommand(commandArgs(args), commandTimeoutMs)
   );
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.ran && result.runnerError) process.exitCode = 2;

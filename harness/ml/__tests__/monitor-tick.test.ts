@@ -67,6 +67,39 @@ describe('launchd-compatible monitor tick entrypoint', () => {
     expect(readMonitorSchedule(scheduleFile)?.schedule.activeUntilMs).toBeUndefined();
   });
 
+  it('times out a stuck monitor command and releases the active window', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-monitor-tick-'));
+    dirs.push(dir);
+    const scheduleFile = path.join(dir, 'schedule.json');
+    createMonitorSchedule(scheduleFile, {
+      campaignId: 'tick-campaign',
+      everyMs: 60_000,
+      nextDueAtMs: Date.now() - 1,
+    });
+    const result = spawnSync(
+      process.execPath,
+      [
+        tick,
+        '--schedule',
+        scheduleFile,
+        '--command-timeout-ms',
+        '50',
+        '--command',
+        process.execPath,
+        '-e',
+        'setTimeout(() => {}, 10_000)',
+      ],
+      { encoding: 'utf8', timeout: 5_000 }
+    );
+    expect(result.status).toBe(2);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ran: true,
+      reason: 'due',
+      runnerError: 'monitor runner timed out after 50ms',
+    });
+    expect(readMonitorSchedule(scheduleFile)?.schedule.activeUntilMs).toBeUndefined();
+  });
+
   it('does not invoke the runner for a not-due schedule', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-monitor-tick-'));
     dirs.push(dir);
