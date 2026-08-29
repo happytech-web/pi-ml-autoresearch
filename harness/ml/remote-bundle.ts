@@ -99,5 +99,9 @@ export function packRemoteBundle(
   const bundledExecutor = path.join(outputDir, 'remote-executor.py');
   fs.copyFileSync(executor, bundledExecutor);
   fs.chmodSync(bundledExecutor, 0o755);
+  const sentinel = fileURLToPath(new URL('../ml-health-sentinel.py', import.meta.url));
+  const bundledSentinel = path.join(outputDir, 'ml-health-sentinel.py');
+  fs.copyFileSync(sentinel, bundledSentinel);
+  fs.chmodSync(bundledSentinel, 0o755);
   return queue;
 }
