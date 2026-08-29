@@ -21,9 +21,9 @@ export interface MonitorLifecycleInput {
 }
 
 export type MonitorLifecycleDecision =
-  | { action: 'cleanup'; reason: 'completed-and-gates-verified' }
+  | { action: Extract<MonitorLifecycleAction, 'cleanup'>; reason: 'completed-and-gates-verified' }
   | {
-      action: 'continue';
+      action: Extract<MonitorLifecycleAction, 'continue'>;
       reason:
         | 'health-not-terminal'
         | 'terminal-gate-incomplete'

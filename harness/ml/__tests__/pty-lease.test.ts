@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { requestPtyLease, startPtyLeaseDaemon } from '../pty-lease.js';
+import { readPtyLeaseState, requestPtyLease, startPtyLeaseDaemon } from '../pty-lease.js';
 
 const dirs: string[] = [];
 
@@ -43,6 +43,7 @@ describe('independent PTY connection lease daemon', () => {
     expect(first.state.pid).toBe(second.state.pid);
     expect(fs.statSync(socket).mode & 0o777).toBe(0o600);
     expect(fs.statSync(state).mode & 0o777).toBe(0o600);
+    expect(readPtyLeaseState(state)?.leaseId).toBe(first.state.leaseId);
     const exited = new Promise<number | null>((resolve) => daemon.once('exit', resolve));
     const stopped = await requestPtyLease(socket, { action: 'stop' });
     expect(stopped.ok).toBe(true);
