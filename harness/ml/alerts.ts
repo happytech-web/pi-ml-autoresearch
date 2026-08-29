@@ -29,7 +29,7 @@ export type AlertDecision =
       notify: true;
       reason: 'new' | 'severity-upgraded' | 'escalation-due' | 'recovered' | 'completed';
     }
-  | { notify: false; reason: 'cooldown' | 'escalation-limit' | 'acked' };
+  | { notify: false; reason: 'normal' | 'cooldown' | 'escalation-limit' | 'acked' };
 
 const severityRank: Record<HealthSeverity, number> = { info: 0, warning: 1, critical: 2 };
 
@@ -48,7 +48,11 @@ export function decideAlert(
   nowMs: number,
   existing?: AlertLedgerEntry
 ): AlertDecision {
-  if (!existing) return { notify: true, reason: 'new' };
+  if (!existing) {
+    return observation.state === 'healthy'
+      ? { notify: false, reason: 'normal' }
+      : { notify: true, reason: 'new' };
+  }
   if (existing.fingerprint !== observation.fingerprint) return { notify: true, reason: 'new' };
   const currentSeverity = observation.evidence.reduce<HealthSeverity>(
     (highest, item) =>
