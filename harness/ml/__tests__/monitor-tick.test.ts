@@ -67,10 +67,11 @@ describe('launchd-compatible monitor tick entrypoint', () => {
     expect(readMonitorSchedule(scheduleFile)?.schedule.activeUntilMs).toBeUndefined();
   });
 
-  it('times out a stuck monitor command and releases the active window', () => {
+  it('times out a stuck monitor command and releases the active window', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-monitor-tick-'));
     dirs.push(dir);
     const scheduleFile = path.join(dir, 'schedule.json');
+    const marker = path.join(dir, 'leaked-child');
     createMonitorSchedule(scheduleFile, {
       campaignId: 'tick-campaign',
       everyMs: 60_000,
@@ -87,7 +88,7 @@ describe('launchd-compatible monitor tick entrypoint', () => {
         '--command',
         process.execPath,
         '-e',
-        'setTimeout(() => {}, 10_000)',
+        `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'bad'), 300)`)}], { stdio: 'ignore' }); setTimeout(() => {}, 10_000)`,
       ],
       { encoding: 'utf8', timeout: 5_000 }
     );
@@ -98,6 +99,38 @@ describe('launchd-compatible monitor tick entrypoint', () => {
       runnerError: 'monitor runner timed out after 50ms',
     });
     expect(readMonitorSchedule(scheduleFile)?.schedule.activeUntilMs).toBeUndefined();
+    const deadline = Date.now() + 1_000;
+    while (Date.now() < deadline && !fs.existsSync(marker)) {
+      // Give a child that escaped the process group enough time to surface.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(fs.existsSync(marker)).toBe(false);
+  });
+
+  it('rejects a non-positive monitor command timeout', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-monitor-tick-'));
+    dirs.push(dir);
+    const scheduleFile = path.join(dir, 'schedule.json');
+    createMonitorSchedule(scheduleFile, {
+      campaignId: 'tick-campaign',
+      everyMs: 60_000,
+      nextDueAtMs: Date.now() - 1,
+    });
+    const result = spawnSync(
+      process.execPath,
+      [
+        tick,
+        '--schedule',
+        scheduleFile,
+        '--command-timeout-ms',
+        '0',
+        '--command',
+        process.execPath,
+      ],
+      { encoding: 'utf8' }
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Invalid --command-timeout-ms');
   });
 
   it('does not invoke the runner for a not-due schedule', () => {
