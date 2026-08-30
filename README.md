@@ -81,6 +81,8 @@ Key differences from generic autoresearch:
   `reauth`/`ready` handshake, and never auto-retries;
 - typed `pi-ml-autoresearch lease` client and `ml_connection_lease` Pi tool for status/readiness,
   allowlisted probes, and explicit re-authentication without silently starting a second login;
+- macOS LaunchAgent template for a persistent lease owner that deliberately omits `KeepAlive` so
+  a crashed bootstrap cannot silently trigger another TouchID flow;
 - launchd-compatible `ml-monitor-tick.mjs` entrypoint that gates an external monitor argv bridge with
   durable due/overlap state and a bounded monitor-command timeout; it does not pretend that
   `pi-subagents` is a shell CLI or start models on normal non-due ticks;

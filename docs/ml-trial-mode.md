@@ -201,6 +201,26 @@ Keep this process under the user's background-task/launchd owner so it outlives 
 the bootstrap reaches the final host, run the `ready` operation once. Do not put passwords or tokens
 in the command line, campaign files, or lease state.
 
+For macOS, use `examples/launchd/com.pi.ml-pty-lease.plist` as the owner instead of attaching the
+daemon to a Pi session. Replace every placeholder, create the parent directory with mode `0700`, and
+validate/install it as a user LaunchAgent:
+
+```bash
+mkdir -m 700 -p "$HOME/.pi/ml-leases"
+plutil -lint /absolute/path/to/com.pi.ml-pty-lease.plist
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.pi.ml-pty-lease.plist"
+```
+
+`RunAtLoad` starts the declared bootstrap once when the LaunchAgent is loaded. It intentionally omits
+`KeepAlive`: an unexpected daemon/bootstrap exit must not silently start another TouchID flow. After
+the user completes all hops, the agent must verify the final host and run `lease ready` once. On a
+later lease expiry, `ml_connection_lease reauth` (with an interactive confirmation) starts exactly one
+new bootstrap; the LaunchAgent does not do this automatically. Unload a temporary owner with:
+
+```bash
+launchctl bootout "gui/$(id -u)/com.pi.ml-pty-lease"
+```
+
 The two-step protocol is intentional:
 
 ```text
