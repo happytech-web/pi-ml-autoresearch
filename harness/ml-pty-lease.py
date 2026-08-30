@@ -47,6 +47,7 @@ class LeaseDaemon:
         self.socket_path = args.socket.expanduser().resolve()
         self.state_path = args.state.expanduser().resolve()
         self.ttl_ms = int(args.ttl_seconds * 1000)
+        self.startup_timeout_ms = int(args.startup_timeout_seconds * 1000)
         self.probe_timeout_ms = int(args.probe_timeout_seconds * 1000)
         self.command = args.command
         self.allowed_probe_prefixes = tuple(args.allowed_probe_prefix or ())
@@ -58,6 +59,7 @@ class LeaseDaemon:
         self.generation = 0
         self.lease_id = f"lease-{uuid.uuid4()}"
         self.expires_at_ms = now_ms() + self.ttl_ms
+        self.starting_deadline_ms: int | None = now_ms() + self.startup_timeout_ms
         self.status = "starting"
         self.error: str | None = None
         self.reader: threading.Thread | None = None
@@ -74,6 +76,7 @@ class LeaseDaemon:
             "pid": child_pid,
             "createdAtMs": self.expires_at_ms - self.ttl_ms,
             "expiresAtMs": self.expires_at_ms,
+            "readyDeadlineAtMs": self.starting_deadline_ms,
             "updatedAtMs": now_ms(),
             "error": self.error,
         }
@@ -99,6 +102,7 @@ class LeaseDaemon:
         self.master_fd = master
         os.set_blocking(master, False)
         self.status = "active" if activate else "starting"
+        self.starting_deadline_ms = None if activate else now_ms() + self.startup_timeout_ms
         self.persist()
         self.generation += 1
         generation = self.generation
@@ -145,8 +149,18 @@ class LeaseDaemon:
             if self.status in {"active", "starting"} and now_ms() >= self.expires_at_ms:
                 self.status = "reauth-required"
                 self.error = "connection lease expired; explicit reauthentication required"
-                self.persist()
                 self._terminate_child()
+                self.persist()
+                return
+            if (
+                self.status == "starting"
+                and self.starting_deadline_ms is not None
+                and now_ms() >= self.starting_deadline_ms
+            ):
+                self.status = "reauth-required"
+                self.error = "bootstrap readiness timed out; explicit reauthentication required"
+                self._terminate_child()
+                self.persist()
 
     def _terminate_child(self) -> None:
         child = self.child
@@ -158,6 +172,17 @@ class LeaseDaemon:
             try:
                 child.terminate()
             except OSError:
+                pass
+        try:
+            child.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            try:
+                child.kill()
+            except OSError:
+                pass
+            try:
+                child.wait(timeout=1)
+            except subprocess.TimeoutExpired:
                 pass
 
     def stop(self) -> None:
@@ -206,6 +231,7 @@ class LeaseDaemon:
             self.lease_id = f"lease-{uuid.uuid4()}"
             self.expires_at_ms = now_ms() + self.ttl_ms
             self.status = "starting"
+            self.starting_deadline_ms = now_ms() + self.startup_timeout_ms
             self.error = None
             self.start(activate=False)
 
@@ -216,6 +242,7 @@ class LeaseDaemon:
             if self.child is None or self.child.poll() is not None or self.master_fd is None:
                 raise RuntimeError("bootstrap is no longer running; reauthentication required")
             self.status = "active"
+            self.starting_deadline_ms = None
             self.error = None
             self.persist()
 
@@ -347,6 +374,7 @@ def main() -> int:
     parser.add_argument("--socket", required=True, type=Path)
     parser.add_argument("--state", required=True, type=Path)
     parser.add_argument("--ttl-seconds", type=float, default=172800)
+    parser.add_argument("--startup-timeout-seconds", type=float, default=900)
     parser.add_argument("--probe-timeout-seconds", type=float, default=30)
     parser.add_argument(
         "--allowed-probe-prefix",
@@ -363,8 +391,8 @@ def main() -> int:
     args = parser.parse_args()
     if not args.command:
         raise ValueError("bootstrap command is required")
-    if args.ttl_seconds <= 0 or args.probe_timeout_seconds <= 0:
-        raise ValueError("lease TTL and probe timeout must be positive")
+    if args.ttl_seconds <= 0 or args.startup_timeout_seconds <= 0 or args.probe_timeout_seconds <= 0:
+        raise ValueError("lease TTL, startup timeout, and probe timeout must be positive")
     signal.signal(signal.SIGTERM, stop_signal)
     signal.signal(signal.SIGINT, stop_signal)
     serve(LeaseDaemon(args))

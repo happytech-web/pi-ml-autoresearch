@@ -12,6 +12,7 @@ describe('launchd lease owner template', () => {
     expect(template).not.toContain('<key>KeepAlive</key>');
     expect(template).toContain('<string>--socket</string>');
     expect(template).toContain('<string>--state</string>');
+    expect(template).toContain('<string>--startup-timeout-seconds</string>');
     expect(template).toContain('<string>--command</string>');
     expect(template).toContain('<string>--allowed-probe-prefix</string>');
     expect(template).toContain('<key>EnvironmentVariables</key>');

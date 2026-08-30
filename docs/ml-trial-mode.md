@@ -229,7 +229,11 @@ status=reauth-required -> reauth -> status=starting -> ready -> status=active ->
 ```
 
 If bootstrap exits while `starting`, the lease returns to `reauth-required` and no automatic restart
-is attempted.
+is attempted. A bootstrap that remains `starting` past its readiness deadline (15 minutes in the
+LaunchAgent template, configurable with `--startup-timeout-seconds`) is treated the same way and is
+terminated. The state file exposes this deadline as `readyDeadlineAtMs`; the two-day
+`expiresAtMs` lease TTL only applies after the connection is active (and is not a substitute for a
+bootstrap watchdog).
 
 This is a transport lease, not training state. The remote executor and health sentinel remain the
 source of operational evidence; an unavailable lease means the local monitor is `unknown` and must

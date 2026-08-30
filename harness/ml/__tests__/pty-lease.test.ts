@@ -81,6 +81,31 @@ describePosix('independent PTY connection lease daemon', () => {
     expect(await exited).toBe(0);
   }, 10_000);
 
+  it('fails a bootstrap that never becomes ready instead of leaving starting stuck', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-pty-lease-'));
+    dirs.push(dir);
+    const socket = path.join(dir, 'lease.sock');
+    const state = path.join(dir, 'lease.json');
+    const daemon = startPtyLeaseDaemon({
+      socket,
+      state,
+      command: ['bash', '--noprofile', '--norc', '-i'],
+      ttlSeconds: 5,
+      startupTimeoutSeconds: 0.08,
+      probeTimeoutSeconds: 1,
+      allowedProbePrefixes: ['printf'],
+    });
+    await waitFor(() => fs.existsSync(state));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const expired = await requestPtyLease(socket, { action: 'status' });
+    expect(expired.state.status).toBe('reauth-required');
+    expect(expired.state.error).toContain('readiness timed out');
+    expect(expired.state.pid).toBeNull();
+    const exited = new Promise<number | null>((resolve) => daemon.once('exit', resolve));
+    expect((await requestPtyLease(socket, { action: 'stop' })).state.status).toBe('stopped');
+    expect(await exited).toBe(0);
+  }, 10_000);
+
   it('marks a relay/bootstrap EOF as reauth-required and never auto-restarts it', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-pty-lease-'));
     dirs.push(dir);

@@ -10,6 +10,7 @@ export interface PtyLeaseState {
   pid: number | null;
   createdAtMs: number;
   expiresAtMs: number;
+  readyDeadlineAtMs: number | null;
   updatedAtMs: number;
   error: string | null;
 }
@@ -27,12 +28,16 @@ export function startPtyLeaseDaemon(options: {
   state: string;
   command: string[];
   ttlSeconds?: number;
+  startupTimeoutSeconds?: number;
   probeTimeoutSeconds?: number;
   allowedProbePrefixes: string[];
 }): ChildProcess {
   const script = options.script ?? new URL('../ml-pty-lease.py', import.meta.url).pathname;
   const args = [script, '--socket', options.socket, '--state', options.state];
   if (options.ttlSeconds !== undefined) args.push('--ttl-seconds', String(options.ttlSeconds));
+  if (options.startupTimeoutSeconds !== undefined) {
+    args.push('--startup-timeout-seconds', String(options.startupTimeoutSeconds));
+  }
   if (options.probeTimeoutSeconds !== undefined) {
     args.push('--probe-timeout-seconds', String(options.probeTimeoutSeconds));
   }

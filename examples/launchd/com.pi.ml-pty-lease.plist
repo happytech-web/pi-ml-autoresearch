@@ -16,6 +16,8 @@
     <string>/ABSOLUTE/PATH/TO/.pi/ml-leases/96g.json</string>
     <string>--ttl-seconds</string>
     <string>172800</string>
+    <string>--startup-timeout-seconds</string>
+    <string>900</string>
     <string>--probe-timeout-seconds</string>
     <string>30</string>
     <!-- Repeat this pair for every exact read-only command the campaign needs. -->
