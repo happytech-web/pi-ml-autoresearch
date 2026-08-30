@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { readPtyLeaseState, requestPtyLease, startPtyLeaseDaemon } from '../pty-lease.js';
 
 const dirs: string[] = [];
+const describePosix = process.platform === 'win32' ? describe.skip : describe;
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
@@ -18,7 +19,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 3_000): Promise<voi
   }
 }
 
-describe('independent PTY connection lease daemon', () => {
+describePosix('independent PTY connection lease daemon', () => {
   it('reuses one authenticated PTY across independent client requests', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-pty-lease-'));
     dirs.push(dir);
