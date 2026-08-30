@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import signal
 import socket
@@ -25,6 +26,7 @@ from typing import Any
 
 
 STOP = False
+ANSI_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def now_ms() -> int:
@@ -262,30 +264,58 @@ class LeaseDaemon:
         with self.output_condition:
             if self.status != "active" or self.master_fd is None:
                 raise RuntimeError("connection lease is not active; explicit reauthentication required")
-            marker = f"__PI_ML_LEASE_{uuid.uuid4().hex}__"
-            # Split the marker across printf arguments so an interactive shell's
-            # command echo cannot contain the complete marker before execution.
-            split_at = len(marker) // 2
-            marker_left = marker[:split_at]
-            marker_right = marker[split_at:]
-            payload = (
-                f"{command}; printf '\\n%s%s\\n' '{marker_left}' '{marker_right}'\n"
-            ).encode("utf-8")
-            os.write(self.master_fd, payload)
             deadline = time.monotonic() + timeout_ms / 1000
-            marker_bytes = marker.encode("utf-8")
-            while True:
-                index = self.output.find(marker_bytes)
-                if index >= 0:
-                    result = bytes(self.output[:index])
-                    del self.output[: index + len(marker_bytes)]
-                    return result.decode("utf-8", errors="replace")
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("probe command timed out")
-                self.output_condition.wait(timeout=min(remaining, 0.25))
-                if self.status != "active":
-                    raise RuntimeError("connection lease became unavailable")
+
+            def marker_parts() -> tuple[str, str, bytes]:
+                marker = f"__PI_ML_LEASE_{uuid.uuid4().hex}__"
+                split_at = len(marker) // 2
+                return marker[:split_at], marker[split_at:], marker.encode("utf-8")
+
+            def wait_marker(marker_bytes: bytes) -> bytes:
+                while True:
+                    index = self.output.find(marker_bytes)
+                    if index >= 0:
+                        result = bytes(self.output[:index])
+                        del self.output[: index + len(marker_bytes)]
+                        return result
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("probe command timed out")
+                    self.output_condition.wait(timeout=min(remaining, 0.25))
+                    if self.status != "active":
+                        raise RuntimeError("connection lease became unavailable")
+
+            try:
+                # Disable terminal echo in a separate command so the actual probe
+                # line cannot be mixed with machine-readable command output.
+                setup_left, setup_right, setup_marker = marker_parts()
+                os.write(
+                    self.master_fd,
+                    f"stty -echo; printf '\\n%s%s\\n' '{setup_left}' '{setup_right}'\n".encode(
+                        "utf-8"
+                    ),
+                )
+                wait_marker(setup_marker)
+                # Discard the prompt/terminal controls left after the setup marker.
+                self.output.clear()
+
+                marker_left, marker_right, marker = marker_parts()
+                payload = (
+                    f"{command}; __pi_ml_status=$?; stty echo; printf '\\n%s%s\\n' "
+                    f"'{marker_left}' '{marker_right}'\n"
+                ).encode("utf-8")
+                os.write(self.master_fd, payload)
+                result = wait_marker(marker)
+            except (TimeoutError, RuntimeError):
+                # A timed-out command may leave the PTY with echo disabled.  Best
+                # effort restoration keeps the interactive bootstrap usable.
+                try:
+                    os.write(self.master_fd, b"stty echo\n")
+                except OSError:
+                    pass
+                raise
+            cleaned = ANSI_CSI_RE.sub("", result.decode("utf-8", errors="replace"))
+            return cleaned.replace("\r", "")
 
     def attach(self, connection: socket.socket) -> None:
         """Temporarily forward a starting bootstrap PTY to one interactive client.

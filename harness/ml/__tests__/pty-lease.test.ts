@@ -41,6 +41,8 @@ describePosix('independent PTY connection lease daemon', () => {
     const second = await requestPtyLease(socket, { action: 'probe', command: 'printf SECOND' });
     expect(first.ok).toBe(true);
     expect(first.output).toContain('FIRST');
+    expect(first.output).not.toContain('printf FIRST;');
+    expect(first.output).not.toContain('\u001b[');
     expect(second.ok).toBe(true);
     expect(second.output).toContain('SECOND');
     expect(first.state.leaseId).toBe(second.state.leaseId);
