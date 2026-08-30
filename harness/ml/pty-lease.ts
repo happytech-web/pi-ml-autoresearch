@@ -102,7 +102,16 @@ export async function attachPtyLease(socketPath: string): Promise<void> {
       if (error) reject(error);
       else resolve();
     };
-    const onInput = (chunk: Buffer | string) => socket.write(chunk);
+    const onInput = (chunk: Buffer | string) => {
+      const input = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const detach = input.indexOf(0x1d); // Ctrl-] is the local attach escape.
+      if (detach < 0) {
+        socket.write(input);
+        return;
+      }
+      if (detach > 0) socket.write(input.subarray(0, detach));
+      socket.end();
+    };
     const onEnd = () => socket.end();
 
     socket.on('connect', () => socket.write('{"action":"attach"}\n'));
