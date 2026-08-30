@@ -211,8 +211,14 @@ LaunchAgent:
 ```bash
 mkdir -m 700 -p "$HOME/.pi/ml-leases"
 plutil -lint /absolute/path/to/com.pi.ml-pty-lease.plist
+launchctl bootout "gui/$(id -u)/com.pi.ml-pty-lease" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.pi.ml-pty-lease.plist"
 ```
+
+`bootout` is needed when replacing an already-loaded plist; otherwise launchd may retain the old
+argument/environment snapshot. `bootstrap` starts the job because the template has `RunAtLoad`; do
+this from a user session where the relay's TouchID prompt is visible, then complete the hops and run
+`lease ready` only after verifying the final host.
 
 `RunAtLoad` starts the declared bootstrap once when the LaunchAgent is loaded. It intentionally omits
 `KeepAlive`: an unexpected daemon/bootstrap exit must not silently start another TouchID flow. After
