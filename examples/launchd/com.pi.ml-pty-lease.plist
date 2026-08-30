@@ -40,6 +40,16 @@
   <!-- Replace both bin-directory placeholders so uv and relay-cli are visible to launchd. -->
   <key>EnvironmentVariables</key>
   <dict>
+    <key>HOME</key>
+    <string>/ABSOLUTE/PATH/TO/home</string>
+    <key>USER</key>
+    <string>/ABSOLUTE/PATH/TO/user</string>
+    <key>LOGNAME</key>
+    <string>/ABSOLUTE/PATH/TO/user</string>
+    <key>TERM</key>
+    <string>xterm-256color</string>
+    <key>LANG</key>
+    <string>en_US.UTF-8</string>
     <key>PATH</key>
     <string>/ABSOLUTE/PATH/TO/uv-bin:/ABSOLUTE/PATH/TO/relay-bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
