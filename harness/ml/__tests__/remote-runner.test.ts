@@ -107,6 +107,16 @@ function runExecutor(bundle: string, action = 'run') {
   );
 }
 
+it('packs the standard-library health sentinel alongside the remote executor', () => {
+  const { bundle, configFile, trialFile } = fixture(0.42);
+  packRemoteBundle(configFile, [trialFile], bundle);
+  expect(fs.statSync(path.join(bundle, 'ml-health-sentinel.py')).mode & 0o111).toBeGreaterThan(0);
+  expect(fs.statSync(path.join(bundle, 'ml-health-adapter.py')).mode & 0o111).toBeGreaterThan(0);
+  expect(
+    fs.statSync(path.join(bundle, 'ml-remote-health-adapter.py')).mode & 0o111
+  ).toBeGreaterThan(0);
+});
+
 async function waitFor(check: () => boolean, timeoutMs = 3000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -147,6 +157,9 @@ describeRemote('remote fixed-queue executor', () => {
     expect(JSON.parse(fs.readFileSync(path.join(bundle, 'remote-state.json'), 'utf8')).status).toBe(
       'completed'
     );
+    expect(fs.statSync(path.join(bundle, 'remote-state.json')).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.join(bundle, 'remote-events.jsonl')).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.join(bundle, '.remote-executor.lock')).mode & 0o777).toBe(0o600);
     const events = fs
       .readFileSync(path.join(bundle, 'remote-events.jsonl'), 'utf8')
       .trim()

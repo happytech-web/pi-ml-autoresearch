@@ -66,11 +66,36 @@ Key differences from generic autoresearch:
 - optional `@narumitw/pi-goal` bridge via `/ml-search-goal <campaign-dir>`;
 - standard-library Python remote executor for a pre-approved fixed queue;
 - full-lifetime single-writer lock and confirmed process-group cleanup on the final host;
+- deterministic health probe (`health` CLI) and durable alert-ledger primitives for local/mock validation;
+- standard-library `ml-health-adapter.py` for declared progress/executor/terminal/filesystem/log inputs;
+- Linux reference `ml-remote-health-adapter.py` for read-only remote-executor PID/start identity and
+  terminal-state mapping; scheduler/GPU-specific adapters remain project-owned;
+- standard-library `ml-health-sentinel.py` bundled for isolated final-host probes;
+- injectable monitor control adapters for lease expiry/re-auth gates, overlap decisions, and notification routing;
+- bounded notification delivery retry/timeout bridge with no secret or evidence-path payloads;
+- standard-library HTTP notification adapter for ntfy/Gotify-compatible webhooks, with env-only
+  bearer secret loading and endpoint/timeout validation;
+- explicit env-only ntfy and Gotify channel wrappers with service-specific payload and auth headers;
+- optional user-owned Python PTY lease daemon for reusing one interactive bootstrap (for example
+  `blogin.py`) across Pi sessions; relay EOF/TTL enters an explicit re-auth gate, uses a
+  `reauth`/`ready` handshake, and never auto-retries;
+- typed `pi-ml-autoresearch lease` client and `ml_connection_lease` Pi tool for status/readiness,
+  allowlisted probes, and explicit re-authentication without silently starting a second login;
+- macOS LaunchAgent template for a persistent lease owner that deliberately omits `KeepAlive` so
+  a crashed bootstrap cannot silently trigger another TouchID flow;
+- launchd-compatible `ml-monitor-tick.mjs` entrypoint that gates an external monitor argv bridge with
+  durable due/overlap state and a bounded monitor-command timeout; it does not pretend that
+  `pi-subagents` is a shell CLI or start models on normal non-due ticks;
+- health-gated `ml-monitor-bridge.mjs` that starts a fresh monitor command only for degraded, failed,
+  unknown, or unavailable health input, while keeping healthy/completed ticks model-free;
 - no generic SSH, jump-host, or scheduler adapter: the agent bootstraps the bundle through the
   project's existing access path and starts it in remote tmux/Slurm.
 
 See [docs/ml-trial-mode.md](docs/ml-trial-mode.md). Generic `/autoresearch` behavior remains
 unchanged.
+
+Project-specific health adapter requirements and the mock-first verification matrix are documented in
+[docs/ml-health-adapter-contract.md](docs/ml-health-adapter-contract.md).
 
 ### Extension tools
 

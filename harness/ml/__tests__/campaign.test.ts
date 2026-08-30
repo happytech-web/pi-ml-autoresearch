@@ -228,4 +228,34 @@ describe('ML campaign state', () => {
     fs.writeFileSync(trialsFile, content, 'utf8');
     expect(reconcileCampaign(campaignDir).ok).toBe(false);
   });
+
+  it('recovers a campaign write lock whose owner process is gone', () => {
+    const { campaignDir, config, trial } = fixture();
+    initCampaign(campaignDir, config);
+    const lock = path.join(campaignDir, '.campaign-write.lock');
+    fs.mkdirSync(lock, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(
+      path.join(lock, 'owner.json'),
+      JSON.stringify({ pid: 99_999_999, acquiredAtMs: Date.now() }),
+      { mode: 0o600 }
+    );
+    expect(preflightTrial(campaignDir, trial).status).toBe('preflight');
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it('fails closed for an active or malformed campaign write lock', () => {
+    const { campaignDir, config, trial } = fixture();
+    initCampaign(campaignDir, config);
+    const lock = path.join(campaignDir, '.campaign-write.lock');
+    fs.mkdirSync(lock, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(
+      path.join(lock, 'owner.json'),
+      JSON.stringify({ pid: process.pid, acquiredAtMs: Date.now() }),
+      { mode: 0o600 }
+    );
+    expect(() => preflightTrial(campaignDir, trial)).toThrow('Campaign is busy');
+    fs.rmSync(lock, { recursive: true });
+    fs.mkdirSync(lock, { recursive: true, mode: 0o700 });
+    expect(() => preflightTrial(campaignDir, trial)).toThrow('Campaign is busy');
+  });
 });

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pi.ml-pty-lease</string>
+
+  <!-- Replace every /ABSOLUTE/... value before installing with launchctl. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/ABSOLUTE/PATH/TO/python3</string>
+    <string>/ABSOLUTE/PATH/TO/pi-ml-autoresearch/harness/ml-pty-lease.py</string>
+    <string>--socket</string>
+    <string>/ABSOLUTE/PATH/TO/.pi/ml-leases/96g.sock</string>
+    <string>--state</string>
+    <string>/ABSOLUTE/PATH/TO/.pi/ml-leases/96g.json</string>
+    <string>--ttl-seconds</string>
+    <string>172800</string>
+    <string>--startup-timeout-seconds</string>
+    <string>900</string>
+    <string>--probe-timeout-seconds</string>
+    <string>30</string>
+    <!-- Repeat this pair for every exact read-only command the campaign needs. -->
+    <string>--allowed-probe-prefix</string>
+    <string>hostname</string>
+    <string>--allowed-probe-prefix</string>
+    <string>nvidia-smi --query-gpu=name,memory.total --format=csv,noheader</string>
+    <string>--allowed-probe-prefix</string>
+    <string>df -h /dev/shm</string>
+    <string>--allowed-probe-prefix</string>
+    <string>python3 remote-executor.py</string>
+    <!-- The bootstrap argv must be the final argument group. -->
+    <string>--command</string>
+    <string>/ABSOLUTE/PATH/TO/blogin.py</string>
+    <string>--non-interactive</string>
+    <string>--index</string>
+    <string>0</string>
+  </array>
+
+  <!-- Replace both bin-directory placeholders so uv and relay-cli are visible to launchd. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/ABSOLUTE/PATH/TO/home</string>
+    <key>USER</key>
+    <string>/ABSOLUTE/PATH/TO/user</string>
+    <key>LOGNAME</key>
+    <string>/ABSOLUTE/PATH/TO/user</string>
+    <key>TERM</key>
+    <string>xterm-256color</string>
+    <key>LANG</key>
+    <string>en_US.UTF-8</string>
+    <key>PATH</key>
+    <string>/ABSOLUTE/PATH/TO/uv-bin:/ABSOLUTE/PATH/TO/relay-bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- Do not use KeepAlive: an unexpected exit must not silently retry TouchID. -->
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/dev/null</string>
+  <key>StandardErrorPath</key>
+  <string>/ABSOLUTE/PATH/TO/.pi/ml-leases/96g.error.log</string>
+</dict>
+</plist>

@@ -1,0 +1,348 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  buildMinimalNotification,
+  authorizeMonitorAction,
+  decideMonitorLifecycle,
+  deliverNotification,
+  dispatchNotification,
+  establishConnectionLease,
+  reuseConnectionLease,
+  decideScheduleTick,
+  type MinimalNotification,
+  type NotificationAdapter,
+  verifyConnectionLease,
+} from '../monitoring.js';
+import { observeHealth, type HealthInput, type HealthPolicy } from '../health.js';
+
+const dirs: string[] = [];
+const healthPolicy: HealthPolicy = {
+  stale: { warningMs: 10, confirmationMs: 20 },
+  disk: {
+    warningBytes: 100,
+    criticalBytes: 20,
+    warningPercent: 10,
+    criticalPercent: 2,
+    warningInodes: 100,
+    criticalInodes: 20,
+  },
+  sentinelHeartbeatMaxAgeMs: 10,
+};
+const alertPolicy = { cooldownMs: 10, escalationMs: 20, maxEscalations: 2 };
+
+afterEach(() => {
+  for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+function healthyInput(): HealthInput {
+  return {
+    nowMs: 100,
+    campaignId: 'campaign-monitor',
+    runId: 'run-1',
+    attemptId: 'attempt-1',
+    sentinelHeartbeatAtMs: 100,
+    executor: { processAlive: true, identityMatches: true },
+    progress: {
+      runId: 'run-1',
+      attemptId: 'attempt-1',
+      phase: 'train',
+      sequence: 1,
+      timestampMs: 100,
+      finiteMetrics: true,
+    },
+    disk: { availableBytes: 1000, availablePercent: 50, availableInodes: 1000 },
+  };
+}
+
+function healthyObservation() {
+  return observeHealth(healthPolicy, healthyInput());
+}
+
+describe('monitor control adapters', () => {
+  it('reuses a lease without reauthentication until its TTL expires', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-lease-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'lease.json');
+    establishConnectionLease(file, 'campaign-monitor', 100, 50);
+    expect(reuseConnectionLease(file, 'campaign-monitor', 120).usable).toBe(true);
+    expect(reuseConnectionLease(file, 'campaign-monitor', 150)).toEqual({
+      usable: false,
+      reason: 'reauth-required',
+    });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).status).toBe('reauth-required');
+  });
+
+  it('keeps monitoring paused while an interactive reauthentication is starting', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-lease-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'lease.json');
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        schemaVersion: 1,
+        campaignId: 'campaign-monitor',
+        leaseId: 'lease-starting',
+        transport: 'background-pty',
+        createdAtMs: 100,
+        expiresAtMs: 10_000,
+        lastUsedAtMs: 100,
+        status: 'starting',
+      })
+    );
+    expect(reuseConnectionLease(file, 'campaign-monitor', 120)).toEqual({
+      usable: false,
+      reason: 'authentication-pending',
+    });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).status).toBe('starting');
+  });
+
+  it('keeps monitoring active until completed, artifact, and reconcile gates pass', () => {
+    const completed = observeHealth(healthPolicy, {
+      ...healthyInput(),
+      terminal: {
+        contractVerified: true,
+        artifactsVerified: true,
+        reconcileVerified: true,
+        allRanksExited: true,
+      },
+    });
+    expect(
+      decideMonitorLifecycle({
+        observation: completed,
+        reconcileVerified: false,
+        artifactsVerified: true,
+        recoveryRequired: false,
+      })
+    ).toEqual({ action: 'continue', reason: 'terminal-gate-incomplete' });
+    expect(
+      decideMonitorLifecycle({
+        observation: completed,
+        reconcileVerified: true,
+        artifactsVerified: true,
+        recoveryRequired: false,
+      })
+    ).toEqual({ action: 'cleanup', reason: 'completed-and-gates-verified' });
+    expect(
+      decideMonitorLifecycle({
+        observation: completed,
+        reconcileVerified: true,
+        artifactsVerified: true,
+        recoveryRequired: true,
+      })
+    ).toEqual({ action: 'continue', reason: 'recovery-required' });
+  });
+
+  it('blocks unsafe automatic actions and never cancels unknown observations', () => {
+    const failed = observeHealth(healthPolicy, {
+      ...healthyInput(),
+      executor: { processAlive: false, identityMatches: false },
+    });
+    const unknown = observeHealth(healthPolicy, {
+      ...healthyInput(),
+      sentinelHeartbeatAtMs: undefined,
+    });
+    expect(authorizeMonitorAction('block-next-trial', unknown).allowed).toBe(true);
+    expect(authorizeMonitorAction('cancel-active-trial', unknown, true)).toEqual({
+      allowed: false,
+      reason: 'cancel-requires-critical-failure',
+    });
+    expect(authorizeMonitorAction('cancel-active-trial', failed)).toEqual({
+      allowed: false,
+      reason: 'cancel-safety-invariant-required',
+    });
+    expect(authorizeMonitorAction('cancel-active-trial', failed, true)).toEqual({
+      allowed: true,
+      reason: 'safety-block',
+    });
+    expect(authorizeMonitorAction('retry-trial', failed).allowed).toBe(false);
+    expect(authorizeMonitorAction('resume-trial', failed).allowed).toBe(false);
+    expect(authorizeMonitorAction('mutate-search', failed).allowed).toBe(false);
+  });
+
+  it('rejects a lease belonging to another campaign', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-lease-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'lease.json');
+    establishConnectionLease(file, 'campaign-a', 100, 50);
+    expect(reuseConnectionLease(file, 'campaign-b', 110)).toEqual({
+      usable: false,
+      reason: 'campaign-mismatch',
+    });
+  });
+
+  it('writes private lease state and rejects a corrupt lease without silently reauthing', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-lease-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'lease.json');
+    establishConnectionLease(file, 'campaign-monitor', 100, 50, 'ssh-control-master');
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    }
+    fs.writeFileSync(file, '{"schemaVersion":1,"campaignId":');
+    expect(() => reuseConnectionLease(file, 'campaign-monitor', 110)).toThrow();
+    expect(fs.readFileSync(file, 'utf8')).toBe('{"schemaVersion":1,"campaignId":');
+  });
+
+  it('requires the underlying PTY/SSH transport to be alive before reusing a lease', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-lease-'));
+    dirs.push(dir);
+    const file = path.join(dir, 'lease.json');
+    const lease = establishConnectionLease(file, 'campaign-monitor', 100, 50);
+    expect(
+      await verifyConnectionLease(file, 'campaign-monitor', 120, {
+        isAlive: async (current) => current.leaseId === lease.leaseId,
+      })
+    ).toMatchObject({ usable: true });
+    expect(
+      await verifyConnectionLease(file, 'campaign-monitor', 125, {
+        isAlive: async () => false,
+      })
+    ).toEqual({ usable: false, reason: 'transport-unavailable' });
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).status).toBe('reauth-required');
+  });
+
+  it('skips overlapping schedule ticks and reports due/catch-up ticks', () => {
+    const schedule = {
+      campaignId: 'campaign-monitor',
+      everyMs: 30,
+      nextDueAtMs: 100,
+      activeUntilMs: 120,
+    };
+    expect(decideScheduleTick(110, schedule)).toEqual({ due: false, reason: 'overlap-skip' });
+    expect(decideScheduleTick(120, schedule)).toEqual({ due: true, reason: 'due' });
+    expect(decideScheduleTick(90, { ...schedule, activeUntilMs: undefined })).toEqual({
+      due: false,
+      reason: 'not-due',
+    });
+  });
+
+  it('rejects invalid schedule intervals instead of creating a hot loop', () => {
+    const schedule = {
+      campaignId: 'campaign-monitor',
+      everyMs: 0,
+      nextDueAtMs: 100,
+    };
+    expect(() => decideScheduleTick(100, schedule)).toThrow('everyMs must be positive');
+    expect(() =>
+      decideScheduleTick(100, { ...schedule, everyMs: Number.POSITIVE_INFINITY })
+    ).toThrow('everyMs must be positive');
+  });
+
+  it('builds a minimal notification without evidence details or paths', () => {
+    const observation = healthyObservation();
+    const notification = buildMinimalNotification(observation);
+    expect(notification).toMatchObject({
+      campaignId: 'campaign-monitor',
+      state: 'healthy',
+      severity: 'info',
+    });
+    expect(JSON.stringify(notification)).not.toContain('detail');
+  });
+
+  it('dispatches through an injected adapter and records durable ledger state', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-notify-'));
+    dirs.push(dir);
+    const sent: MinimalNotification[] = [];
+    const adapter: NotificationAdapter = { send: async (event) => void sent.push(event) };
+    const alertFile = path.join(dir, 'alerts.jsonl');
+    const observation = observeHealth(healthPolicy, {
+      ...healthyInput(),
+      executor: { processAlive: false, identityMatches: false },
+    });
+    const first = await dispatchNotification(adapter, alertFile, alertPolicy, observation, 100);
+    const second = await dispatchNotification(adapter, alertFile, alertPolicy, observation, 105);
+    expect(first.sent).toBe(true);
+    expect(second.sent).toBe(false);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('keeps normal healthy probes silent', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-notify-'));
+    dirs.push(dir);
+    const sent: MinimalNotification[] = [];
+    const adapter: NotificationAdapter = { send: async (event) => void sent.push(event) };
+    const result = await dispatchNotification(
+      adapter,
+      path.join(dir, 'alerts.jsonl'),
+      alertPolicy,
+      healthyObservation(),
+      100
+    );
+    expect(result.sent).toBe(false);
+    expect(result.decision).toBe('normal');
+    expect(sent).toHaveLength(0);
+  });
+
+  it('propagates notification delivery failures without mutating health evidence', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-notify-'));
+    dirs.push(dir);
+    const observation = observeHealth(healthPolicy, {
+      ...healthyInput(),
+      executor: { processAlive: false, identityMatches: false },
+    });
+    const before = JSON.stringify(observation);
+    const adapter: NotificationAdapter = {
+      send: async () => {
+        throw new Error('notification endpoint unavailable');
+      },
+    };
+    await expect(
+      dispatchNotification(adapter, path.join(dir, 'alerts.jsonl'), alertPolicy, observation, 100)
+    ).rejects.toThrow('notification endpoint unavailable');
+    expect(JSON.stringify(observation)).toBe(before);
+    expect(fs.existsSync(path.join(dir, 'alerts.jsonl'))).toBe(false);
+  });
+
+  it('retries delivery with bounded exponential backoff', async () => {
+    const observation = healthyObservation();
+    const event = buildMinimalNotification({
+      ...observation,
+      state: 'failed',
+      evidence: [
+        {
+          detector: 'executor',
+          reasonCode: 'executor-not-running',
+          severity: 'critical',
+          confidence: 0.99,
+          detail: 'executor process is not alive',
+        },
+      ],
+    });
+    let attempts = 0;
+    const delays: number[] = [];
+    await deliverNotification(
+      {
+        send: async () => {
+          attempts += 1;
+          if (attempts < 3) throw new Error('temporary endpoint failure');
+        },
+      },
+      event,
+      { maxAttempts: 3, timeoutMs: 100, backoffMs: 5 },
+      async (delayMs) => {
+        delays.push(delayMs);
+      }
+    );
+    expect(attempts).toBe(3);
+    expect(delays).toEqual([5, 10]);
+  });
+
+  it('times out a hung notification adapter and respects the attempt ceiling', async () => {
+    let attempts = 0;
+    await expect(
+      deliverNotification(
+        {
+          send: async () => {
+            attempts += 1;
+            await new Promise(() => undefined);
+          },
+        },
+        buildMinimalNotification(healthyObservation()),
+        { maxAttempts: 2, timeoutMs: 5, backoffMs: 0 }
+      )
+    ).rejects.toThrow('notification delivery timed out');
+    expect(attempts).toBe(2);
+  });
+});

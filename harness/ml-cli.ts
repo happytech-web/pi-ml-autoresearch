@@ -5,6 +5,13 @@ import * as path from 'node:path';
 import { initCampaign, reconcileCampaign, snapshot, trialContractHash } from './ml/campaign.js';
 import { cancelLocalTrial, pollLocalTrial, submitLocalTrial } from './ml/local-runner.js';
 import { packRemoteBundle } from './ml/remote-bundle.js';
+import {
+  observeHealth,
+  type HealthInput,
+  type HealthPolicy,
+  type HealthState,
+} from './ml/health.js';
+import { attachPtyLease, requestPtyLease } from './ml/pty-lease.js';
 import { readJson } from './ml/io.js';
 import type { MlSearchConfig, MlTrialSpec } from './ml/types.js';
 
@@ -35,6 +42,10 @@ Usage:
   pi-ml-autoresearch cancel --campaign <dir> --trial-id <id>
   pi-ml-autoresearch status --campaign <dir>
   pi-ml-autoresearch reconcile --campaign <dir>
+  pi-ml-autoresearch health --input <health-input.json> --policy <health-policy.json> [--previous-state <state>]
+  pi-ml-autoresearch lease status --socket <path>
+  pi-ml-autoresearch lease attach|ready|reauth|stop --socket <path>
+  pi-ml-autoresearch lease probe --socket <path> --command <allowlisted command> [--timeout-ms <ms>]
 `;
 }
 
@@ -62,6 +73,41 @@ async function main(): Promise<void> {
     const outputDir = path.resolve(flag(args, 'output'));
     const queue = packRemoteBundle(path.resolve(flag(args, 'config')), trialFiles, outputDir);
     output({ outputDir, queue });
+    return;
+  }
+  if (action === 'health') {
+    const input = readJson<HealthInput>(path.resolve(flag(args, 'input')));
+    const policy = readJson<HealthPolicy>(path.resolve(flag(args, 'policy')));
+    const previous = args.includes('--previous-state')
+      ? (flag(args, 'previous-state') as HealthState)
+      : undefined;
+    output(observeHealth(policy, input, previous));
+    return;
+  }
+  if (action === 'lease') {
+    const leaseAction = args.shift();
+    if (!leaseAction || !['attach', 'status', 'ready', 'reauth', 'stop', 'probe'].includes(leaseAction)) {
+      throw new Error(`Unknown or missing lease action\n${usage()}`);
+    }
+    const socket = path.resolve(flag(args, 'socket'));
+    if (leaseAction === 'attach') {
+      await attachPtyLease(socket);
+      return;
+    }
+    const request: Record<string, unknown> = { action: leaseAction };
+    if (leaseAction === 'probe') {
+      request.command = flag(args, 'command');
+      const timeout = args.includes('--timeout-ms') ? Number(flag(args, 'timeout-ms')) : undefined;
+      if (timeout !== undefined) {
+        if (!Number.isSafeInteger(timeout) || timeout <= 0) {
+          throw new Error('--timeout-ms must be a positive integer');
+        }
+        request.timeoutMs = timeout;
+      }
+    }
+    const response = await requestPtyLease(socket, request);
+    output(response);
+    if (!response.ok) process.exitCode = 2;
     return;
   }
   const campaignDir = path.resolve(flag(args, 'campaign'));

@@ -10,6 +10,11 @@ All notable changes to this project will be documented in this file.
   ML trial states, detached local execution, strict JSON metrics, and fail-closed ledger
   reconciliation.
 - Optional `/ml-search-goal` bridge for `@narumitw/pi-goal` managed-run RPC with graceful fallback.
+- Deterministic health sentinel, project/remote health adapters, durable alert and notification
+  bridges, and launchd-compatible health-gated monitor scheduling.
+- User-owned PTY connection lease with explicit reauthentication/TTL boundaries for interactive
+  bootstrap paths, plus a fixed-queue Linux remote executor with process and run-token identity
+  checks.
 - ML campaign, runner, evidence, and goal-bridge tests.
 
 ## [1.0.5] - 2026-08-09
