@@ -14,5 +14,8 @@ describe('launchd lease owner template', () => {
     expect(template).toContain('<string>--state</string>');
     expect(template).toContain('<string>--command</string>');
     expect(template).toContain('<string>--allowed-probe-prefix</string>');
+    expect(template).toContain('<key>EnvironmentVariables</key>');
+    expect(template).toContain('/ABSOLUTE/PATH/TO/uv-bin');
+    expect(template).toContain('/ABSOLUTE/PATH/TO/relay-bin');
   });
 });

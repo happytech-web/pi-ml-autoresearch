@@ -202,8 +202,9 @@ the bootstrap reaches the final host, run the `ready` operation once. Do not put
 in the command line, campaign files, or lease state.
 
 For macOS, use `examples/launchd/com.pi.ml-pty-lease.plist` as the owner instead of attaching the
-daemon to a Pi session. Replace every placeholder, create the parent directory with mode `0700`, and
-validate/install it as a user LaunchAgent:
+daemon to a Pi session. Replace every placeholder, including the `uv-bin` and `relay-bin` entries in
+the launchd `PATH` (launchd does not inherit the interactive shell PATH), create the parent directory
+with mode `0700`, and validate/install it as a user LaunchAgent:
 
 ```bash
 mkdir -m 700 -p "$HOME/.pi/ml-leases"

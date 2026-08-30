@@ -35,6 +35,13 @@
     <string>0</string>
   </array>
 
+  <!-- Replace both bin-directory placeholders so uv and relay-cli are visible to launchd. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/ABSOLUTE/PATH/TO/uv-bin:/ABSOLUTE/PATH/TO/relay-bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
   <key>RunAtLoad</key>
   <true/>
   <!-- Do not use KeepAlive: an unexpected exit must not silently retry TouchID. -->
