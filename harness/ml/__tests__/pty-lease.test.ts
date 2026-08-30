@@ -97,6 +97,7 @@ describePosix('independent PTY connection lease daemon', () => {
     await waitFor(() => JSON.parse(fs.readFileSync(state, 'utf8')).status === 'reauth-required');
     const response = await requestPtyLease(socket, { action: 'status' });
     expect(response.state.status).toBe('reauth-required');
+    expect(response.state.pid).toBeNull();
     expect(response.state.error).toContain('PTY exited');
     const exited = new Promise<number | null>((resolve) => daemon.once('exit', resolve));
     expect((await requestPtyLease(socket, { action: 'stop' })).state.status).toBe('stopped');

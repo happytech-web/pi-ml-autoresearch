@@ -63,12 +63,15 @@ class LeaseDaemon:
         self.reader: threading.Thread | None = None
 
     def state(self) -> dict[str, Any]:
+        child_pid = None
+        if self.child is not None and self.child.poll() is None:
+            child_pid = self.child.pid
         return {
             "schemaVersion": 1,
             "leaseId": self.lease_id,
             "transport": "background-pty",
             "status": self.status,
-            "pid": self.child.pid if self.child else None,
+            "pid": child_pid,
             "createdAtMs": self.expires_at_ms - self.ttl_ms,
             "expiresAtMs": self.expires_at_ms,
             "updatedAtMs": now_ms(),
