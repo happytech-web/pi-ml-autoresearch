@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -105,6 +106,63 @@ describePosix('independent PTY connection lease daemon', () => {
     expect(expired.state.error).toContain('readiness timed out');
     expect(expired.state.pid).toBeNull();
     expect(expired.state.readyDeadlineAtMs).toBeNull();
+    const exited = new Promise<number | null>((resolve) => daemon.once('exit', resolve));
+    expect((await requestPtyLease(socket, { action: 'stop' })).state.status).toBe('stopped');
+    expect(await exited).toBe(0);
+  }, 10_000);
+
+  it('forwards a starting bootstrap through an ephemeral attach and keeps the lease reusable', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-pty-lease-'));
+    dirs.push(dir);
+    const socket = path.join(dir, 'lease.sock');
+    const state = path.join(dir, 'lease.json');
+    const daemon = startPtyLeaseDaemon({
+      socket,
+      state,
+      command: ['bash', '--noprofile', '--norc', '-i'],
+      ttlSeconds: 5,
+      probeTimeoutSeconds: 1,
+      allowedProbePrefixes: ['printf'],
+    });
+    await waitFor(() => fs.existsSync(state));
+    await new Promise<void>((resolve, reject) => {
+      const client = net.createConnection(socket);
+      let buffer = '';
+      let acknowledged = false;
+      const timer = setTimeout(() => {
+        client.destroy();
+        reject(new Error('timed out waiting for attach output'));
+      }, 3_000);
+      const finish = (error?: Error) => {
+        clearTimeout(timer);
+        client.destroy();
+        if (error) reject(error);
+        else resolve();
+      };
+      client.on('connect', () => client.write('{"action":"attach"}\n'));
+      client.on('data', (chunk) => {
+        buffer += chunk.toString('utf8');
+        if (!acknowledged) {
+          const newline = buffer.indexOf('\n');
+          if (newline < 0) return;
+          const response = JSON.parse(buffer.slice(0, newline)) as { ok: boolean; attached?: boolean };
+          expect(response.ok).toBe(true);
+          expect(response.attached).toBe(true);
+          acknowledged = true;
+          buffer = buffer.slice(newline + 1);
+          client.write('printf ATTACHED\\n');
+        }
+        if (buffer.includes('ATTACHED')) finish();
+      });
+      client.on('error', finish);
+    });
+    expect((await requestPtyLease(socket, { action: 'ready' })).state.status).toBe('active');
+    expect(
+      (await requestPtyLease(socket, { action: 'probe', command: 'printf AFTER-ATTACH' })).output
+    ).toContain('AFTER-ATTACH');
+    const refused = await requestPtyLease(socket, { action: 'attach' });
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toContain('only allowed while bootstrap is starting');
     const exited = new Promise<number | null>((resolve) => daemon.once('exit', resolve));
     expect((await requestPtyLease(socket, { action: 'stop' })).state.status).toBe('stopped');
     expect(await exited).toBe(0);

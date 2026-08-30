@@ -11,7 +11,7 @@ import {
   type HealthPolicy,
   type HealthState,
 } from './ml/health.js';
-import { requestPtyLease } from './ml/pty-lease.js';
+import { attachPtyLease, requestPtyLease } from './ml/pty-lease.js';
 import { readJson } from './ml/io.js';
 import type { MlSearchConfig, MlTrialSpec } from './ml/types.js';
 
@@ -44,7 +44,7 @@ Usage:
   pi-ml-autoresearch reconcile --campaign <dir>
   pi-ml-autoresearch health --input <health-input.json> --policy <health-policy.json> [--previous-state <state>]
   pi-ml-autoresearch lease status --socket <path>
-  pi-ml-autoresearch lease ready|reauth|stop --socket <path>
+  pi-ml-autoresearch lease attach|ready|reauth|stop --socket <path>
   pi-ml-autoresearch lease probe --socket <path> --command <allowlisted command> [--timeout-ms <ms>]
 `;
 }
@@ -86,10 +86,14 @@ async function main(): Promise<void> {
   }
   if (action === 'lease') {
     const leaseAction = args.shift();
-    if (!leaseAction || !['status', 'ready', 'reauth', 'stop', 'probe'].includes(leaseAction)) {
+    if (!leaseAction || !['attach', 'status', 'ready', 'reauth', 'stop', 'probe'].includes(leaseAction)) {
       throw new Error(`Unknown or missing lease action\n${usage()}`);
     }
     const socket = path.resolve(flag(args, 'socket'));
+    if (leaseAction === 'attach') {
+      await attachPtyLease(socket);
+      return;
+    }
     const request: Record<string, unknown> = { action: leaseAction };
     if (leaseAction === 'probe') {
       request.command = flag(args, 'command');

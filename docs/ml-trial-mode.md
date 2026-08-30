@@ -172,11 +172,17 @@ The typed CLI is the agent-facing shell boundary:
 
 ```bash
 pi-ml-autoresearch lease status --socket /absolute/path/lease.sock
+pi-ml-autoresearch lease attach --socket /absolute/path/lease.sock
 pi-ml-autoresearch lease ready --socket /absolute/path/lease.sock
 pi-ml-autoresearch lease probe --socket /absolute/path/lease.sock \
   --command 'python3 remote-executor.py status --campaign /absolute/path/campaign'
 pi-ml-autoresearch lease reauth --socket /absolute/path/lease.sock  # only after user approval/TouchID
 ```
+
+When a LaunchAgent owns a bootstrap PTY, run `lease attach` from a visible user terminal while the
+state is `starting` to complete a relay/TouchID prompt and the remaining hops. The attach stream is
+ephemeral and is closed once the lease becomes `active`; detach before issuing `lease ready`. It is
+not available for an active lease, so monitoring still has only the declared bounded probe surface.
 
 `remote_cmd.py` remains a legacy one-shot client and deliberately starts `blogin.py` for every
 invocation; it must not be used by a lease-backed monitor. Configure the daemon's

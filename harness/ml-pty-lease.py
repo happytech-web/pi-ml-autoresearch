@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import select
 import signal
 import socket
 import subprocess
@@ -286,6 +287,55 @@ class LeaseDaemon:
                 if self.status != "active":
                     raise RuntimeError("connection lease became unavailable")
 
+    def attach(self, connection: socket.socket) -> None:
+        """Temporarily forward a starting bootstrap PTY to one interactive client.
+
+        This is intentionally unavailable once the lease is active: active leases
+        expose only their declared bounded probes, never an arbitrary shell.
+        """
+        with self.lock:
+            if self.status != "starting" or self.master_fd is None:
+                raise RuntimeError("PTY attach is only allowed while bootstrap is starting")
+            master_fd = self.master_fd
+            initial = bytes(self.output)
+            self.output.clear()
+            state = self.state()
+        connection.sendall(
+            (json.dumps({"ok": True, "attached": True, "state": state}, ensure_ascii=False) + "\n").encode(
+                "utf-8"
+            )
+        )
+        if initial:
+            connection.sendall(initial)
+        connection.setblocking(False)
+        while True:
+            with self.lock:
+                if self.status != "starting" or self.master_fd != master_fd:
+                    break
+            readable, _, _ = select.select([connection], [], [], 0.1)
+            if readable:
+                try:
+                    data = connection.recv(8192)
+                except (BlockingIOError, OSError):
+                    break
+                if not data:
+                    break
+                try:
+                    os.write(master_fd, data)
+                except OSError:
+                    break
+            with self.output_condition:
+                if self.output:
+                    data = bytes(self.output)
+                    self.output.clear()
+                else:
+                    data = b""
+            if data:
+                try:
+                    connection.sendall(data)
+                except OSError:
+                    break
+
     def handle(self, request: dict[str, Any]) -> dict[str, Any]:
         action = request.get("action")
         self.check_expiry()
@@ -348,6 +398,9 @@ def serve(daemon: LeaseDaemon) -> None:
                         if b"\n" in chunk:
                             break
                     request = json.loads(b"".join(chunks).split(b"\n", 1)[0])
+                    if request.get("action") == "attach":
+                        daemon.attach(connection)
+                        continue
                     response = daemon.handle(request)
                 except (OSError, ValueError, RuntimeError, TimeoutError, json.JSONDecodeError) as error:
                     response = {"ok": False, "error": str(error), "state": daemon.state()}

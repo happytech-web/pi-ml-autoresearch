@@ -81,6 +81,63 @@ export async function requestPtyLease(
   });
 }
 
+export async function attachPtyLease(socketPath: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const socket = net.createConnection(socketPath);
+    let acknowledged = false;
+    let header = '';
+    let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+      socket.destroy();
+      reject(new Error('PTY attach request timed out'));
+    }, 35_000);
+
+    const restore = () => {
+      if (timer) clearTimeout(timer);
+      process.stdin.removeListener('data', onInput);
+      process.stdin.removeListener('end', onEnd);
+      if (process.stdin.isTTY && process.stdin.setRawMode) process.stdin.setRawMode(false);
+    };
+    const finish = (error?: Error) => {
+      restore();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onInput = (chunk: Buffer | string) => socket.write(chunk);
+    const onEnd = () => socket.end();
+
+    socket.on('connect', () => socket.write('{"action":"attach"}\n'));
+    socket.on('data', (chunk: Buffer) => {
+      if (!acknowledged) {
+        header += chunk.toString('utf8');
+        const newline = header.indexOf('\n');
+        if (newline < 0) return;
+        const response = JSON.parse(header.slice(0, newline)) as PtyLeaseResponse & {
+          attached?: boolean;
+        };
+        if (!response.ok || !response.attached) {
+          socket.destroy();
+          finish(new Error(response.error ?? 'PTY attach was refused'));
+          return;
+        }
+        acknowledged = true;
+        if (timer) clearTimeout(timer);
+        timer = undefined;
+        if (process.stdin.isTTY && process.stdin.setRawMode) process.stdin.setRawMode(true);
+        process.stdin.on('data', onInput);
+        process.stdin.on('end', onEnd);
+        process.stdin.resume();
+        const remainder = Buffer.from(header.slice(newline + 1), 'utf8');
+        header = '';
+        if (remainder.length) process.stdout.write(remainder);
+        return;
+      }
+      process.stdout.write(chunk);
+    });
+    socket.on('error', (error) => finish(error));
+    socket.on('close', () => finish());
+  });
+}
+
 export function readPtyLeaseState(file: string): PtyLeaseState | null {
   if (!fs.existsSync(file)) return null;
   return JSON.parse(fs.readFileSync(file, 'utf8')) as PtyLeaseState;
