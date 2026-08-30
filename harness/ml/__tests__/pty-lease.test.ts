@@ -51,6 +51,7 @@ describePosix('independent PTY connection lease daemon', () => {
     const stopped = await requestPtyLease(socket, { action: 'stop' });
     expect(stopped.ok).toBe(true);
     expect(stopped.state.status).toBe('stopped');
+    expect(stopped.state.pid).toBeNull();
     expect(await exited).toBe(0);
   }, 10_000);
 
