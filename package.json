@@ -7,7 +7,8 @@
   ],
   "bin": {
     "pi-autoresearch": "harness/pi-autoresearch.mjs",
-    "pi-ml-autoresearch": "harness/pi-ml-autoresearch.mjs"
+    "pi-ml-autoresearch": "harness/pi-ml-autoresearch.mjs",
+    "pi-ml-lease": "harness/ml-lease-cli.mjs"
   },
   "files": [
     "extensions",
