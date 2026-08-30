@@ -44,6 +44,7 @@ describePosix('independent PTY connection lease daemon', () => {
     expect(second.output).toContain('SECOND');
     expect(first.state.leaseId).toBe(second.state.leaseId);
     expect(first.state.pid).toBe(second.state.pid);
+    expect(first.state.readyDeadlineAtMs).toBeNull();
     expect(fs.statSync(socket).mode & 0o777).toBe(0o600);
     expect(fs.statSync(state).mode & 0o777).toBe(0o600);
     expect(readPtyLeaseState(state)?.leaseId).toBe(first.state.leaseId);
@@ -74,6 +75,7 @@ describePosix('independent PTY connection lease daemon', () => {
     const expired = await requestPtyLease(socket, { action: 'status' });
     expect(expired.ok).toBe(true);
     expect(expired.state.status).toBe('reauth-required');
+    expect(expired.state.readyDeadlineAtMs).toBeNull();
     const refused = await requestPtyLease(socket, { action: 'probe', command: 'printf BAD' });
     expect(refused.ok).toBe(false);
     expect(refused.error).toContain('reauthentication required');
@@ -102,6 +104,7 @@ describePosix('independent PTY connection lease daemon', () => {
     expect(expired.state.status).toBe('reauth-required');
     expect(expired.state.error).toContain('readiness timed out');
     expect(expired.state.pid).toBeNull();
+    expect(expired.state.readyDeadlineAtMs).toBeNull();
     const exited = new Promise<number | null>((resolve) => daemon.once('exit', resolve));
     expect((await requestPtyLease(socket, { action: 'stop' })).state.status).toBe('stopped');
     expect(await exited).toBe(0);
@@ -124,6 +127,7 @@ describePosix('independent PTY connection lease daemon', () => {
     const response = await requestPtyLease(socket, { action: 'status' });
     expect(response.state.status).toBe('reauth-required');
     expect(response.state.pid).toBeNull();
+    expect(response.state.readyDeadlineAtMs).toBeNull();
     expect(response.state.error).toContain('PTY exited');
     const exited = new Promise<number | null>((resolve) => daemon.once('exit', resolve));
     expect((await requestPtyLease(socket, { action: 'stop' })).state.status).toBe('stopped');

@@ -66,7 +66,11 @@ class LeaseDaemon:
 
     def state(self) -> dict[str, Any]:
         child_pid = None
-        if self.child is not None and self.child.poll() is None:
+        if (
+            self.status not in {"reauth-required", "stopped"}
+            and self.child is not None
+            and self.child.poll() is None
+        ):
             child_pid = self.child.pid
         return {
             "schemaVersion": 1,
@@ -139,6 +143,7 @@ class LeaseDaemon:
                 self.master_fd = None
             if generation == self.generation and self.status in {"active", "starting"}:
                 self.status = "reauth-required"
+                self.starting_deadline_ms = None
                 self.error = "bootstrap PTY exited or relay connection closed"
                 self.persist()
             with self.output_condition:
@@ -148,6 +153,7 @@ class LeaseDaemon:
         with self.lock:
             if self.status in {"active", "starting"} and now_ms() >= self.expires_at_ms:
                 self.status = "reauth-required"
+                self.starting_deadline_ms = None
                 self.error = "connection lease expired; explicit reauthentication required"
                 self._terminate_child()
                 self.persist()
@@ -158,6 +164,7 @@ class LeaseDaemon:
                 and now_ms() >= self.starting_deadline_ms
             ):
                 self.status = "reauth-required"
+                self.starting_deadline_ms = None
                 self.error = "bootstrap readiness timed out; explicit reauthentication required"
                 self._terminate_child()
                 self.persist()
@@ -172,17 +179,6 @@ class LeaseDaemon:
             try:
                 child.terminate()
             except OSError:
-                pass
-        try:
-            child.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            try:
-                child.kill()
-            except OSError:
-                pass
-            try:
-                child.wait(timeout=1)
-            except subprocess.TimeoutExpired:
                 pass
 
     def stop(self) -> None:
@@ -199,6 +195,7 @@ class LeaseDaemon:
                 self.master_fd = None
             if self.status != "stopped":
                 self.status = "stopped"
+                self.starting_deadline_ms = None
                 self.persist()
 
     def reauthenticate(self) -> None:
