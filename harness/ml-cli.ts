@@ -11,6 +11,7 @@ import {
   type HealthPolicy,
   type HealthState,
 } from './ml/health.js';
+import { requestPtyLease } from './ml/pty-lease.js';
 import { readJson } from './ml/io.js';
 import type { MlSearchConfig, MlTrialSpec } from './ml/types.js';
 
@@ -42,6 +43,9 @@ Usage:
   pi-ml-autoresearch status --campaign <dir>
   pi-ml-autoresearch reconcile --campaign <dir>
   pi-ml-autoresearch health --input <health-input.json> --policy <health-policy.json> [--previous-state <state>]
+  pi-ml-autoresearch lease status --socket <path>
+  pi-ml-autoresearch lease ready|reauth|stop --socket <path>
+  pi-ml-autoresearch lease probe --socket <path> --command <allowlisted command> [--timeout-ms <ms>]
 `;
 }
 
@@ -78,6 +82,28 @@ async function main(): Promise<void> {
       ? (flag(args, 'previous-state') as HealthState)
       : undefined;
     output(observeHealth(policy, input, previous));
+    return;
+  }
+  if (action === 'lease') {
+    const leaseAction = args.shift();
+    if (!leaseAction || !['status', 'ready', 'reauth', 'stop', 'probe'].includes(leaseAction)) {
+      throw new Error(`Unknown or missing lease action\n${usage()}`);
+    }
+    const socket = path.resolve(flag(args, 'socket'));
+    const request: Record<string, unknown> = { action: leaseAction };
+    if (leaseAction === 'probe') {
+      request.command = flag(args, 'command');
+      const timeout = args.includes('--timeout-ms') ? Number(flag(args, 'timeout-ms')) : undefined;
+      if (timeout !== undefined) {
+        if (!Number.isSafeInteger(timeout) || timeout <= 0) {
+          throw new Error('--timeout-ms must be a positive integer');
+        }
+        request.timeoutMs = timeout;
+      }
+    }
+    const response = await requestPtyLease(socket, request);
+    output(response);
+    if (!response.ok) process.exitCode = 2;
     return;
   }
   const campaignDir = path.resolve(flag(args, 'campaign'));

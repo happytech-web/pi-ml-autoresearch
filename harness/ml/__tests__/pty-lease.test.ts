@@ -33,6 +33,8 @@ describe('independent PTY connection lease daemon', () => {
       allowedProbePrefixes: ['printf'],
     });
     await waitFor(() => fs.existsSync(state));
+    expect((await requestPtyLease(socket, { action: 'status' })).state.status).toBe('starting');
+    expect((await requestPtyLease(socket, { action: 'ready' })).state.status).toBe('active');
     const first = await requestPtyLease(socket, { action: 'probe', command: 'printf FIRST' });
     const second = await requestPtyLease(socket, { action: 'probe', command: 'printf SECOND' });
     expect(first.ok).toBe(true);
@@ -65,6 +67,7 @@ describe('independent PTY connection lease daemon', () => {
       allowedProbePrefixes: ['printf'],
     });
     await waitFor(() => fs.existsSync(state));
+    expect((await requestPtyLease(socket, { action: 'ready' })).state.status).toBe('active');
     await new Promise((resolve) => setTimeout(resolve, 150));
     const expired = await requestPtyLease(socket, { action: 'status' });
     expect(expired.ok).toBe(true);
@@ -147,6 +150,7 @@ describe('independent PTY connection lease daemon', () => {
       allowedProbePrefixes: ['printf'],
     });
     await waitFor(() => fs.existsSync(state));
+    expect((await requestPtyLease(socket, { action: 'ready' })).state.status).toBe('active');
     const refused = await requestPtyLease(socket, { action: 'reauth' });
     expect(refused.ok).toBe(false);
     expect(refused.error).toContain('only allowed');
@@ -216,6 +220,7 @@ describe('independent PTY connection lease daemon', () => {
     const initial = await requestPtyLease(socket, { action: 'status' });
     await waitFor(() => fs.existsSync(count));
     expect(fs.readFileSync(count, 'utf8')).toBe('1');
+    expect((await requestPtyLease(socket, { action: 'ready' })).state.status).toBe('active');
     expect(
       (await requestPtyLease(socket, { action: 'probe', command: 'printf HOP' })).output
     ).toContain('HOP');
@@ -248,6 +253,7 @@ describe('independent PTY connection lease daemon', () => {
       allowedProbePrefixes: ['printf'],
     });
     await waitFor(() => fs.existsSync(state));
+    expect((await requestPtyLease(socket, { action: 'ready' })).state.status).toBe('active');
     const refused = await requestPtyLease(socket, { action: 'probe', command: 'rm -rf /' });
     expect(refused.ok).toBe(false);
     expect(refused.error).toContain('outside the declared allowlist');

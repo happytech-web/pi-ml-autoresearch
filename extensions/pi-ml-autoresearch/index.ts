@@ -1,8 +1,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Type } from '@sinclair/typebox';
 import { getAgentDir, type ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { loadConfig } from '../../harness/ml/campaign.js';
+import { requestPtyLease } from '../../harness/ml/pty-lease.js';
 import { writeJsonAtomic } from '../../harness/ml/io.js';
 import {
   buildGoalObjective,
@@ -34,6 +36,96 @@ export default function mlAutoresearch(pi: ExtensionAPI): void {
   pi.on('session_shutdown', () => {
     for (const unsubscribe of activeSubscriptions.values()) unsubscribe();
     activeSubscriptions.clear();
+  });
+
+  pi.registerTool({
+    name: 'ml_connection_lease',
+    label: 'ML connection lease',
+    description:
+      'Inspect or use an existing ML interactive connection lease. Probes are restricted by the allowlist declared when the lease daemon was started; this tool never starts blogin or retries TouchID.',
+    promptSnippet: 'Inspect or use an existing authenticated ML connection lease',
+    promptGuidelines: [
+      'Use ml_connection_lease for declared remote status/health probes when a lease socket is available.',
+      'Use ml_connection_lease status before any probe and treat reauth-required as unknown until the user explicitly reauthenticates.',
+      'Use ml_connection_lease reauth only after the user has confirmed that a new TouchID/bootstrap is intended; never poll reauth in a loop.',
+      'Do not use ml_connection_lease probe for training submission, arbitrary shell, file transfer, or configuration mutation.',
+    ],
+    parameters: Type.Object({
+      action: Type.Union([
+        Type.Literal('status'),
+        Type.Literal('probe'),
+        Type.Literal('ready'),
+        Type.Literal('reauth'),
+        Type.Literal('stop'),
+      ]),
+      socketPath: Type.String({ description: 'Absolute path to the 0600 lease Unix socket.' }),
+      command: Type.Optional(
+        Type.String({
+          description: 'One bounded command matching the daemon allowlist (probe only).',
+        })
+      ),
+      timeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (!path.isAbsolute(params.socketPath) || params.socketPath.includes('\0')) {
+        return {
+          content: [
+            { type: 'text', text: 'socketPath must be an absolute local Unix socket path' },
+          ],
+          details: { ok: false },
+        };
+      }
+      if (params.action === 'probe' && !params.command?.trim()) {
+        return {
+          content: [{ type: 'text', text: 'command is required for probe' }],
+          details: { ok: false },
+        };
+      }
+      if (params.action === 'reauth') {
+        if (!ctx.hasUI) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'reauth requires an interactive user confirmation and TouchID',
+              },
+            ],
+            details: { ok: false, code: 'interactive-confirmation-required' },
+          };
+        }
+        const confirmed = await ctx.ui.confirm(
+          'Re-authenticate ML connection?',
+          'This starts the declared bootstrap and may request TouchID. Continue once?'
+        );
+        if (!confirmed) {
+          return {
+            content: [{ type: 'text', text: 'Re-authentication was declined by the user' }],
+            details: { ok: false, code: 'user-declined' },
+          };
+        }
+      }
+      try {
+        const request: Record<string, unknown> = { action: params.action };
+        if (params.command !== undefined) request.command = params.command;
+        if (params.timeoutMs !== undefined) request.timeoutMs = params.timeoutMs;
+        const response = await requestPtyLease(params.socketPath, request);
+        const output = response.output ? `\n${response.output}` : '';
+        return {
+          content: [{ type: 'text', text: `${JSON.stringify(response.state)}${output}` }],
+          details: response,
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Lease request failed: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+          details: { ok: false, error: error instanceof Error ? error.message : String(error) },
+        };
+      }
+    },
   });
 
   pi.registerCommand('ml-search-goal', {

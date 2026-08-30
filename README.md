@@ -79,6 +79,8 @@ Key differences from generic autoresearch:
 - optional user-owned Python PTY lease daemon for reusing one interactive bootstrap (for example
   `blogin.py`) across Pi sessions; relay EOF/TTL enters an explicit re-auth gate, uses a
   `reauth`/`ready` handshake, and never auto-retries;
+- typed `pi-ml-autoresearch lease` client and `ml_connection_lease` Pi tool for status/readiness,
+  allowlisted probes, and explicit re-authentication without silently starting a second login;
 - launchd-compatible `ml-monitor-tick.mjs` entrypoint that gates an external monitor argv bridge with
   durable due/overlap state and a bounded monitor-command timeout; it does not pretend that
   `pi-subagents` is a shell CLI or start models on normal non-due ticks;

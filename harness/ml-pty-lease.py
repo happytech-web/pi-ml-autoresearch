@@ -78,7 +78,7 @@ class LeaseDaemon:
     def persist(self) -> None:
         write_json_atomic(self.state_path, self.state())
 
-    def start(self, activate: bool = True) -> None:
+    def start(self, activate: bool = False) -> None:
         if not self.command:
             raise ValueError("bootstrap command is required")
         master, slave = pty.openpty()

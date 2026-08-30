@@ -3,6 +3,12 @@
 import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { tsImport } from 'tsx/esm/api';
+
+const { requestPtyLease } = await tsImport(
+  new URL('./ml/pty-lease.ts', import.meta.url).href,
+  import.meta.url
+);
 
 const QUIET_STATES = new Set(['healthy', 'completed', 'recovered']);
 
@@ -18,6 +24,56 @@ function monitorCommand(args) {
   const index = args.indexOf('--monitor-command');
   if (index < 0 || index === args.length - 1) return [];
   return args.slice(index + 1);
+}
+
+function flagValues(args, name) {
+  const values = [];
+  const monitorIndex = args.indexOf('--monitor-command');
+  const optionArgs = monitorIndex < 0 ? args : args.slice(0, monitorIndex);
+  for (let index = 0; index < optionArgs.length - 1; index++) {
+    if (optionArgs[index] === `--${name}`) values.push(optionArgs[index + 1]);
+  }
+  return values;
+}
+
+async function readLease(args) {
+  const socketIndex = args.indexOf('--lease-socket');
+  if (socketIndex < 0) return null;
+  const socket = args[socketIndex + 1];
+  if (!socket || socket.startsWith('--')) throw new Error('Missing --lease-socket value');
+  const probeCommands = flagValues(args, 'probe-command');
+  const status = await requestPtyLease(socket, { action: 'status' });
+  if (!status.ok) {
+    return { socket, state: status.state, error: status.error ?? 'lease status request failed' };
+  }
+  if (status.state.status !== 'active') {
+    return {
+      socket,
+      state: status.state,
+      error: `connection lease is ${status.state.status}; explicit reauthentication is required`,
+    };
+  }
+  const outputs = [];
+  for (const command of probeCommands) {
+    const response = await requestPtyLease(socket, { action: 'probe', command });
+    if (!response.ok) {
+      return {
+        socket,
+        state: response.state,
+        error: response.error ?? 'lease probe failed',
+        outputs,
+      };
+    }
+    const output = response.output ?? '';
+    outputs.push({
+      command,
+      output:
+        output.length > 64 * 1024
+          ? `${output.slice(0, 64 * 1024)}\n[lease probe output truncated]`
+          : output,
+    });
+  }
+  return { socket, state: status.state, outputs };
 }
 
 function readHealth(file) {
@@ -55,7 +111,14 @@ async function main() {
   const campaign = path.resolve(requiredFlag(args, 'campaign'));
   const healthFile = path.resolve(requiredFlag(args, 'health'));
   const health = readHealth(healthFile);
-  if (QUIET_STATES.has(health.state)) {
+  let lease;
+  try {
+    lease = await readLease(args);
+  } catch (error) {
+    lease = { error: error instanceof Error ? error.message : String(error) };
+  }
+  const leaseUnavailable = lease?.error !== undefined;
+  if (QUIET_STATES.has(health.state) && !leaseUnavailable) {
     process.stdout.write(
       `${JSON.stringify({ invoked: false, state: health.state, reason: 'normal-health' })}\n`
     );
@@ -68,11 +131,20 @@ async function main() {
     ...process.env,
     PI_ML_MONITOR_CAMPAIGN: campaign,
     PI_ML_MONITOR_HEALTH: healthFile,
-    PI_ML_MONITOR_STATE: health.state,
-    PI_ML_MONITOR_REASON: health.reason,
+    PI_ML_MONITOR_STATE: leaseUnavailable ? 'unknown' : health.state,
+    PI_ML_MONITOR_REASON: leaseUnavailable ? 'connection-lease-unavailable' : health.reason,
+    PI_ML_LEASE_SOCKET: lease?.socket ?? '',
+    PI_ML_LEASE_STATE: lease?.state?.status ?? 'unavailable',
+    PI_ML_LEASE_ERROR: lease?.error ?? '',
+    PI_ML_LEASE_OUTPUT: JSON.stringify(lease?.outputs ?? []),
   });
   process.stdout.write(
-    `${JSON.stringify({ invoked: true, state: health.state, reason: health.reason })}\n`
+    `${JSON.stringify({
+      invoked: true,
+      state: leaseUnavailable ? 'unknown' : health.state,
+      reason: leaseUnavailable ? 'connection-lease-unavailable' : health.reason,
+      lease: lease ?? undefined,
+    })}\n`
   );
 }
 

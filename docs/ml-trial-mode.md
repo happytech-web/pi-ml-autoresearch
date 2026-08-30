@@ -157,14 +157,49 @@ credential renewal, file transfer, or scheduler submission.
 When the declared access path requires an interactive relay such as `blogin.py`, use the bundled
 `harness/ml-pty-lease.py` as a separate user-owned local process. It owns the relay PTY independently
 of a Pi session and exposes a `0600` Unix socket for `status`, bounded `probe`, and explicit `stop`
-requests. Start it once after the user completes TouchID, then let later monitor sessions call the
-socket through `harness/ml/pty-lease.ts`. The daemon stores only lease metadata, never PTY output or
-credentials. Relay EOF or the 1-2 day TTL changes the state to `reauth-required`; probe requests are
-rejected until the user explicitly sends a `reauth` request (or starts a fresh daemon/bootstrap).
-`reauth` restarts the declared bootstrap command and creates a new lease ID, but leaves the lease in
-`starting`; after the user completes TouchID/bootstrap, send a `ready` request before probes resume.
-The daemon never simulates or retries TouchID without the user's interaction. It does not change the
-campaign queue or make `pi-background-tasks` persistent.
+requests. Start the daemon once with the declared bootstrap command; complete TouchID and all hops,
+then explicitly mark the connection ready. Later monitor sessions use the socket through
+`harness/ml/pty-lease.ts`, the `pi-ml-autoresearch lease` CLI, or the `ml_connection_lease` Pi tool.
+The daemon stores only lease metadata, never PTY output or credentials. Relay EOF or the 1-2 day TTL
+changes the state to `reauth-required`; probe requests are rejected until the user explicitly sends a
+`reauth` request (or starts a fresh daemon/bootstrap). `reauth` restarts the declared bootstrap command
+and creates a new lease ID, but leaves the lease in `starting`; after the user completes
+TouchID/bootstrap, send a `ready` request before probes resume. The daemon never simulates or retries
+TouchID without the user's interaction. It does not change the campaign queue or make
+`pi-background-tasks` persistent.
+
+The typed CLI is the agent-facing shell boundary:
+
+```bash
+pi-ml-autoresearch lease status --socket /absolute/path/lease.sock
+pi-ml-autoresearch lease ready --socket /absolute/path/lease.sock
+pi-ml-autoresearch lease probe --socket /absolute/path/lease.sock \
+  --command 'python3 remote-executor.py status --campaign /absolute/path/campaign'
+pi-ml-autoresearch lease reauth --socket /absolute/path/lease.sock  # only after user approval/TouchID
+```
+
+`remote_cmd.py` remains a legacy one-shot client and deliberately starts `blogin.py` for every
+invocation; it must not be used by a lease-backed monitor. Configure the daemon's
+`--allowed-probe-prefix` values to match the exact read-only status/health commands needed by the
+campaign. Submission, cancellation, file transfer, and arbitrary shell remain outside this probe
+interface.
+
+For example, the daemon itself is a long-lived local background task (adapt the bootstrap argv to the
+project's declared access path):
+
+```bash
+python3 harness/ml-pty-lease.py \
+  --socket "$HOME/.pi/ml-leases/96g.sock" \
+  --state "$HOME/.pi/ml-leases/96g.json" \
+  --allowed-probe-prefix 'hostname' \
+  --allowed-probe-prefix 'nvidia-smi --query-gpu=name,memory.total --format=csv,noheader' \
+  --allowed-probe-prefix 'python3 remote-executor.py' \
+  --command /absolute/path/to/blogin.py --non-interactive --index 0
+```
+
+Keep this process under the user's background-task/launchd owner so it outlives a Pi session. After
+the bootstrap reaches the final host, run the `ready` operation once. Do not put passwords or tokens
+in the command line, campaign files, or lease state.
 
 The two-step protocol is intentional:
 
@@ -244,8 +279,24 @@ node harness/ml-monitor-bridge.mjs \
 `healthy`, `recovered`, and `completed` states produce a successful no-op result. `degraded`, `failed`,
 `unknown`, or an unavailable/malformed health file invoke the declared command. The command receives
 `PI_ML_MONITOR_CAMPAIGN`, `PI_ML_MONITOR_HEALTH`, `PI_ML_MONITOR_STATE`, and `PI_ML_MONITOR_REASON` in its
-environment. The bridge does not infer recovery, retry a trial, cancel a process, or mutate search
-configuration; the fresh monitor remains subject to the authority and evidence gates.
+environment. To use the authenticated connection without starting a new login, pass the lease socket
+and one or more declared read-only probes:
+
+```bash
+node harness/ml-monitor-bridge.mjs \
+  --campaign /absolute/campaign \
+  --health /absolute/campaign/health.json \
+  --lease-socket /absolute/path/lease.sock \
+  --probe-command 'python3 remote-executor.py status --campaign /absolute/remote/campaign' \
+  --monitor-command pi --no-session -p 'Inspect the supplied campaign health and lease evidence.'
+```
+
+Probe output is supplied as `PI_ML_LEASE_OUTPUT`; lease status and errors are supplied as
+`PI_ML_LEASE_STATE` and `PI_ML_LEASE_ERROR`. If the lease is missing, starting, expired, or the
+probe fails, the bridge invokes the monitor with `PI_ML_MONITOR_STATE=unknown` and
+`PI_ML_MONITOR_REASON=connection-lease-unavailable`. It never calls `reauth` or starts `blogin.py`.
+The bridge does not infer recovery, retry a trial, cancel a process, or mutate search configuration;
+the fresh monitor remains subject to the authority and evidence gates.
 
 On macOS, copy `examples/launchd/com.pi.ml-monitor-tick.plist`, replace all `/ABSOLUTE/PATH/TO/`
 placeholders, validate it with `plutil -lint`, and load it as a user LaunchAgent. `StartInterval` is
@@ -255,10 +306,12 @@ started. Keep the plist and schedule under a user-owned directory with mode `060
 The user-facing workflow stays conversational:
 
 1. The agent grills and locks the complete pilot queue, including any allowed retry run specs.
-2. The user approves that revision and performs any required one-time authentication.
+2. The user approves that revision; the agent starts the connection lease and the user completes
+   TouchID/bootstrap once, then the agent records `ready` only after verifying the final host.
 3. The agent packs and transfers the bundle through the declared server access path.
 4. The agent starts the executor as the foreground command of remote tmux/Slurm and may disconnect.
-5. A later agent reconnects, runs remote `status` and `reconcile`, verifies actual artifacts, then
+5. A later agent reconnects through the existing lease, runs bounded remote `status` and `reconcile`,
+   verifies actual artifacts, then
    records evidence and decisions in the local experiment documents.
 
 The agent-facing pack command accepts repeated `--trial` flags in execution order:
